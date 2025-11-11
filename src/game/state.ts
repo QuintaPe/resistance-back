@@ -3,7 +3,7 @@
 import { RoomManager } from "./roomManager";
 import { Player, Game } from "./types";
 import { shuffle } from "../utils/shuffle";
-import { getTeamSizes, getNumSpies } from "./rules";
+import { getTeamSizes, getNumSpies, getFailsRequired } from "./rules";
 
 class GameStateClass {
     start(roomCode: string) {
@@ -15,6 +15,7 @@ class GameStateClass {
 
         const teamSizes = getTeamSizes(n);
         const numSpies = getNumSpies(n);
+        const failsRequired = getFailsRequired(n);
 
         const shuffled = shuffle([...players]);
         const spies = shuffled.slice(0, numSpies).map((p: Player) => p.id);
@@ -25,6 +26,7 @@ class GameStateClass {
             spies,
             currentMission: 0,
             teamSizePerMission: teamSizes,
+            failsRequired,
             proposedTeam: [],
             teamVotes: {},
             missionActions: {},
@@ -106,7 +108,8 @@ class GameStateClass {
 
         // Contar fracasos
         const fails = Object.values(state.missionActions).filter((a) => a === "fail").length;
-        const passed = fails === 0;
+        const failsNeeded = state.failsRequired[state.currentMission];
+        const passed = fails < failsNeeded;
 
         state.results.push({
             team: [...state.proposedTeam],

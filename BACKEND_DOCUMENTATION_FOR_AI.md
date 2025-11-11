@@ -16,7 +16,7 @@
 ## 🎮 Descripción General
 
 Este backend implementa el juego **"The Resistance"**, un juego de dedución social donde:
-- **5-10 jugadores** compiten en equipos
+- **5-12 jugadores** compiten en equipos
 - Hay **Resistencia** (equipo bueno) vs **Espías** (equipo malo)
 - El objetivo es completar **5 misiones**
 - La Resistencia gana si 3+ misiones tienen éxito
@@ -115,6 +115,7 @@ type Game = {
     spies: string[];                            // IDs de espías (PRIVADO)
     currentMission: number;                     // Misión actual (0-4)
     teamSizePerMission: number[];              // Tamaños de equipo [2,3,2,3,3]
+    failsRequired: number[];                    // Fracasos necesarios por misión [1,1,1,2,1]
     proposedTeam: string[];                     // IDs del equipo propuesto
     teamVotes: Record<string, "approve" | "reject">;  // Votos del equipo
     missionActions: Record<string, "success" | "fail">; // Acciones de misión
@@ -145,6 +146,7 @@ type PublicState = {
     leaderIndex: number;
     currentMission: number;
     teamSizePerMission: number[];
+    failsRequired: number[];
     proposedTeam: string[];
     results: MissionResult[];
     rejectedTeamsInRow: number;
@@ -329,7 +331,8 @@ socket.emit('mission:act', {
 
 **Efecto cuando todos actúan**:
 - Cuenta los "fail"
-- Misión pasa si `fails === 0`
+- Misión pasa si `fails < failsRequired[currentMission]`
+- Con 7+ jugadores, la misión 4 requiere 2 fracasos para fallar
 - Añade resultado a `results[]`
 
 **Condiciones de Victoria**:
@@ -420,7 +423,8 @@ Este evento se envía automáticamente después de:
 
 **Cuando todos actúan**:
 - Cuenta fallos
-- **Misión exitosa**: `fails === 0`
+- **Misión exitosa**: `fails < failsRequired[currentMission]`
+- Con 7+ jugadores, la misión 4 requiere 2 fracasos para fallar
 - Guarda resultado en `results[]`
 
 **Verificar Victoria**:
@@ -451,29 +455,41 @@ const TEAM_SIZES = {
     7:  [2, 3, 3, 4, 4],
     8:  [3, 4, 4, 5, 5],
     9:  [3, 4, 4, 5, 5],
-    10: [3, 4, 4, 5, 5]
+    10: [3, 4, 4, 5, 5],
+    11: [4, 5, 5, 5, 6],
+    12: [4, 5, 5, 6, 6]
 };
 ```
 
 **Ejemplo**: Con 7 jugadores
-- Misión 1: 2 personas
-- Misión 2: 3 personas
-- Misión 3: 3 personas
-- Misión 4: 4 personas
-- Misión 5: 4 personas
+- Misión 1: 2 personas (requiere 1 fracaso para fallar)
+- Misión 2: 3 personas (requiere 1 fracaso para fallar)
+- Misión 3: 3 personas (requiere 1 fracaso para fallar)
+- Misión 4: 4 personas (requiere **2 fracasos** para fallar)
+- Misión 5: 4 personas (requiere 1 fracaso para fallar)
 
 ### Número de Espías
 
 ```typescript
-5-6 jugadores → 2 espías
-7-9 jugadores → 3 espías
-10 jugadores  → 4 espías
+5-6 jugadores  → 2 espías
+7-9 jugadores  → 3 espías
+10-11 jugadores → 4 espías
+12 jugadores   → 5 espías
+```
+
+### Fracasos Requeridos por Misión
+
+Con 7 o más jugadores, la **Misión 4** requiere **2 fracasos** para fallar. El resto de misiones solo necesitan 1 fracaso.
+
+```typescript
+5-6 jugadores  → [1, 1, 1, 1, 1] (todas las misiones requieren 1 fracaso)
+7-12 jugadores → [1, 1, 1, 2, 1] (la misión 4 requiere 2 fracasos)
 ```
 
 ### Constantes
 
 ```typescript
-MAX_PLAYERS = 10
+MAX_PLAYERS = 12
 MIN_PLAYERS = 5
 ROOM_CODE_LENGTH = 5
 ```
@@ -521,7 +537,7 @@ ROOM_CODE_LENGTH = 5
 
 | Fase Actual | Acción | Nueva Fase | Condición |
 |-------------|--------|------------|-----------|
-| lobby | game:start | proposeTeam | 5-10 jugadores |
+| lobby | game:start | proposeTeam | 5-12 jugadores |
 | proposeTeam | team:propose | voteTeam | Líder propone |
 | voteTeam | Aprobado | mission | Más de 50% aprueba |
 | voteTeam | Rechazado | reveal | 5 rechazos consecutivos |
@@ -546,7 +562,7 @@ origin: "*"  // Permite todos los orígenes
 ### Constantes del Juego
 
 ```typescript
-MAX_PLAYERS = 10
+MAX_PLAYERS = 12
 MIN_PLAYERS = 5
 ROOM_CODE_LENGTH = 5
 ```
@@ -752,6 +768,53 @@ socket3.emit('mission:act', { roomCode: "ABCDE", action: "success" });
 
 ---
 
+### Ejemplo 4: Misión 4 con 7+ Jugadores Requiere 2 Fracasos
+
+```typescript
+// Partida con 7+ jugadores en la Misión 4
+// Equipo propuesto: [sock1, sock2, sock3, sock4]
+// sock2 y sock4 son espías
+
+{
+    phase: "mission",
+    currentMission: 3,  // Misión 4 (índice 3)
+    proposedTeam: ["sock1", "sock2", "sock3", "sock4"],
+    failsRequired: [1, 1, 1, 2, 1]  // Misión 4 requiere 2 fracasos
+}
+
+// Escenario 1: Solo 1 espía sabotea
+socket1.emit('mission:act', { roomCode: "ABCDE", action: "success" });
+socket2.emit('mission:act', { roomCode: "ABCDE", action: "fail" });  // Espía sabotea
+socket3.emit('mission:act', { roomCode: "ABCDE", action: "success" });
+socket4.emit('mission:act', { roomCode: "ABCDE", action: "success" });  // Espía no sabotea
+
+// 1 fallo < 2 requeridos → ¡Misión EXITOSA!
+
+// Todos reciben game:update:
+{
+    results: [
+        { team: ["sock1", "sock2", "sock3", "sock4"], fails: 1, passed: true }
+    ]
+}
+
+// Escenario 2: Ambos espías sabotean
+socket1.emit('mission:act', { roomCode: "ABCDE", action: "success" });
+socket2.emit('mission:act', { roomCode: "ABCDE", action: "fail" });  // Espía sabotea
+socket3.emit('mission:act', { roomCode: "ABCDE", action: "success" });
+socket4.emit('mission:act', { roomCode: "ABCDE", action: "fail" });  // Espía sabotea
+
+// 2 fallos >= 2 requeridos → Misión FALLIDA
+
+// Todos reciben game:update:
+{
+    results: [
+        { team: ["sock1", "sock2", "sock3", "sock4"], fails: 2, passed: false }
+    ]
+}
+```
+
+---
+
 ## 🎯 Información Importante para el Frontend
 
 ### 1. Gestión de Socket ID
@@ -782,7 +845,7 @@ const amInTeam = publicState.proposedTeam.includes(socket.id);
 
 **lobby**:
 - Mostrar lista de jugadores
-- Botón "Iniciar juego" (si eres el anfitrión y hay 5+ jugadores)
+- Botón "Iniciar juego" (si eres el anfitrión y hay 5-12 jugadores)
 
 **proposeTeam**:
 - Si eres líder: Seleccionar `teamSizePerMission[currentMission]` jugadores
@@ -805,7 +868,34 @@ const amInTeam = publicState.proposedTeam.includes(socket.id);
   - `results.filter(r => !r.passed).length >= 3` → Espías ganan
   - `rejectedTeamsInRow >= 5` → Espías ganan
 
-### 4. Callbacks vs Broadcast
+### 4. Usar `failsRequired[]` para Mostrar Información
+
+El estado público incluye `failsRequired[]` que indica cuántos fracasos necesita cada misión para fallar:
+
+```typescript
+// Ejemplo con 7+ jugadores
+publicState.failsRequired = [1, 1, 1, 2, 1]
+
+// En la UI:
+for (let i = 0; i < 5; i++) {
+    const failsNeeded = publicState.failsRequired[i];
+    if (failsNeeded === 2) {
+        // Mostrar icono especial para Misión 4
+        // "Esta misión requiere 2 fracasos para fallar"
+    }
+}
+
+// Durante una misión:
+const currentFailsRequired = publicState.failsRequired[publicState.currentMission];
+// Mostrar: "Fracasos necesarios: " + currentFailsRequired
+```
+
+**Recomendaciones UI**:
+- Mostrar icono/badge especial en la Misión 4 cuando `failsRequired[3] === 2`
+- Durante la misión, informar: "Se necesitan X fracasos para que falle esta misión"
+- En el historial de resultados, mostrar: "X fracasos (requeridos: Y)"
+
+### 5. Callbacks vs Broadcast
 
 **Callbacks**:
 - Solo para el emisor del evento
@@ -817,14 +907,14 @@ const amInTeam = publicState.proposedTeam.includes(socket.id);
 - Contienen el nuevo estado completo
 - Debes actualizar tu UI cuando los recibes
 
-### 5. Validaciones del Cliente
+### 6. Validaciones del Cliente
 
 Aunque el servidor valida todo, el cliente debería:
 - Deshabilitar botones cuando no es tu turno
 - Mostrar solo opciones válidas según tu rol
 - Indicar cuántos jugadores faltan por actuar
 
-### 6. Determinar Rol del Jugador
+### 7. Determinar Rol del Jugador
 
 **Importante**: El servidor NO envía directamente "eres espía" o "eres resistencia".
 
@@ -905,6 +995,8 @@ socket.on('game:start', ({ roomCode }) => {
 
 - [ ] **UI Global**
   - [ ] Tracker de misiones (1-5)
+  - [ ] Indicador de fracasos requeridos por misión (usar `failsRequired[]`)
+  - [ ] Mostrar icono especial en Misión 4 cuando se requieren 2 fracasos
   - [ ] Contador de rechazos consecutivos
   - [ ] Tu rol (espía/resistencia)
   - [ ] Lista de espías (si eres espía)

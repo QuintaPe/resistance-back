@@ -24,6 +24,7 @@ export type Game = {
     spies: string[];                    // ids de espías
     currentMission: number;             // 0..4
     teamSizePerMission: number[];
+    failsRequired: number[];            // fracasos necesarios por misión
     proposedTeam: string[];             // ids
     teamVotes: Record<string, "approve" | "reject">;
     missionActions: Record<string, "success" | "fail">;

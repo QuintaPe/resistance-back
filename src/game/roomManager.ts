@@ -18,6 +18,7 @@ class RoomManagerClass {
                 spies: [],
                 currentMission: 0,
                 teamSizePerMission: [],
+                failsRequired: [],
                 proposedTeam: [],
                 teamVotes: {},
                 missionActions: {},
@@ -54,6 +55,7 @@ class RoomManagerClass {
             leaderIndex: state.leaderIndex,
             currentMission: state.currentMission,
             teamSizePerMission: state.teamSizePerMission,
+            failsRequired: state.failsRequired,
             proposedTeam: state.proposedTeam,
             results: state.results,
             rejectedTeamsInRow: state.rejectedTeamsInRow
