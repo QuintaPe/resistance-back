@@ -23,7 +23,9 @@ class RoomManagerClass {
                 teamVotes: {},
                 missionActions: {},
                 results: [],
-                rejectedTeamsInRow: 0
+                rejectedTeamsInRow: 0,
+                votedPlayers: [],
+                playersActed: []
             },
             disconnectedPlayers: new Map()
         };
@@ -84,7 +86,9 @@ class RoomManagerClass {
             failsRequired: state.failsRequired,
             proposedTeam: state.proposedTeam,
             results: state.results,
-            rejectedTeamsInRow: state.rejectedTeamsInRow
+            rejectedTeamsInRow: state.rejectedTeamsInRow,
+            votedPlayers: state.votedPlayers,
+            playersActed: state.playersActed
             // roles ocultos no se envían aquí
         };
     }

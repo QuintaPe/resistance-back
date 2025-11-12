@@ -37,6 +37,8 @@ export type Game = {
     missionActions: Record<string, "success" | "fail">;
     results: MissionResult[];
     rejectedTeamsInRow: number;
+    votedPlayers: string[];             // ids de jugadores que ya votaron
+    playersActed: string[];             // ids de jugadores que ya actuaron en la misión
 };
 
 export type MissionResult = {

@@ -31,7 +31,9 @@ class GameStateClass {
             teamVotes: {},
             missionActions: {},
             results: [],
-            rejectedTeamsInRow: 0
+            rejectedTeamsInRow: 0,
+            votedPlayers: [],
+            playersActed: []
         };
 
         // Establecer el número máximo de jugadores al inicio
@@ -70,7 +72,9 @@ class GameStateClass {
             teamVotes: {},
             missionActions: {},
             results: [],
-            rejectedTeamsInRow: 0
+            rejectedTeamsInRow: 0,
+            votedPlayers: [],
+            playersActed: []
         };
 
         // Limpiar el maxPlayers para permitir que entren más jugadores
@@ -98,6 +102,7 @@ class GameStateClass {
 
         state.proposedTeam = teamIds;
         state.teamVotes = {};
+        state.votedPlayers = []; // Limpiar para la nueva votación
         state.phase = "voteTeam";
     }
 
@@ -109,6 +114,11 @@ class GameStateClass {
         if (state.phase !== "voteTeam") return;
 
         state.teamVotes[playerId] = vote;
+
+        // Agregar el jugador a votedPlayers si no está ya
+        if (!state.votedPlayers.includes(playerId)) {
+            state.votedPlayers.push(playerId);
+        }
 
         // Comprobar si todos votaron
         const allVoted = room.players.every((p) => state.teamVotes[p.id]);
@@ -123,17 +133,21 @@ class GameStateClass {
 
             if (state.rejectedTeamsInRow >= 5) {
                 state.phase = "reveal";
+                state.votedPlayers = []; // Limpiar
                 return;
             }
 
             state.leaderIndex = (state.leaderIndex + 1) % room.players.length;
             state.phase = "proposeTeam";
+            state.votedPlayers = []; // Limpiar para la próxima votación
             return;
         }
 
         // Equipo aprobado
         state.phase = "mission";
         state.missionActions = {};
+        state.votedPlayers = []; // Limpiar
+        state.playersActed = []; // Limpiar para la nueva misión
     }
 
     performMissionAction(roomCode: string, playerId: string, action: "success" | "fail") {
@@ -148,6 +162,11 @@ class GameStateClass {
         if (action === "fail" && !isSpy) return;
 
         state.missionActions[playerId] = action;
+
+        // Agregar el jugador a playersActed si no está ya
+        if (!state.playersActed.includes(playerId)) {
+            state.playersActed.push(playerId);
+        }
 
         const allSubmitted = state.proposedTeam.every((id) => state.missionActions[id]);
 
@@ -171,6 +190,7 @@ class GameStateClass {
         state.proposedTeam = [];
         state.teamVotes = {};
         state.missionActions = {};
+        state.playersActed = []; // Limpiar para la próxima misión
         state.rejectedTeamsInRow = 0;
 
         if (resWins || spyWins || state.currentMission >= 5) {
