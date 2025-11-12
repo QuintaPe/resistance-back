@@ -347,7 +347,88 @@ socket.emit('mission:act', {
 
 ---
 
-### 7. Actualización del Juego
+### 7. Reiniciar Partida
+
+**Evento del Cliente**: `game:restart`
+
+```typescript
+socket.emit('game:restart', 
+    { roomCode: "ABCDE" }, 
+    (response) => {
+        if (response.error) {
+            // Error: "La partida aún no ha terminado"
+        } else {
+            // response: { ok: true }
+        }
+    }
+);
+```
+
+**Requisitos**:
+- La partida debe estar en fase "reveal" (terminada)
+
+**Efecto**:
+- Reinicia el juego con nuevos roles aleatorios
+- El líder inicial será el siguiente jugador después del líder anterior
+- Mantiene a todos los jugadores en la sala
+- Cambia la fase a "proposeTeam"
+
+**Respuesta (Callback)**:
+```typescript
+{
+    ok?: boolean;
+    error?: string;     // Si la partida no ha terminado
+}
+```
+
+**Broadcast a la Sala**: `game:update` y `game:role` (a cada jugador individualmente)
+
+---
+
+### 8. Volver al Lobby
+
+**Evento del Cliente**: `game:returnToLobby`
+
+```typescript
+socket.emit('game:returnToLobby', 
+    { roomCode: "ABCDE" }, 
+    (response) => {
+        if (response.error) {
+            // Error: "La partida aún no ha terminado"
+        } else {
+            // response: { ok: true }
+        }
+    }
+);
+```
+
+**Requisitos**:
+- La partida debe estar en fase "reveal" (terminada)
+
+**Efecto**:
+- Resetea completamente el estado del juego a "lobby"
+- Limpia todos los datos de la partida (roles, misiones, votos, etc.)
+- Permite que nuevos jugadores se unan a la sala
+- Mantiene a todos los jugadores actuales en la sala
+- Los jugadores pueden comenzar una nueva partida desde cero
+
+**Respuesta (Callback)**:
+```typescript
+{
+    ok?: boolean;
+    error?: string;     // Si la partida no ha terminado o la sala no existe
+}
+```
+
+**Broadcast a la Sala**: `room:update` (con el estado reseteado a lobby)
+
+**Diferencias con `game:restart`**:
+- `game:restart`: Reinicia inmediatamente con nuevos roles, el juego continúa
+- `game:returnToLobby`: Vuelve al lobby, permite ajustar jugadores antes de comenzar de nuevo
+
+---
+
+### 9. Actualización del Juego
 
 **Evento del Servidor**: `game:update`
 
@@ -361,6 +442,8 @@ Este evento se envía automáticamente después de:
 - `room:create`
 - `room:join`
 - `game:start`
+- `game:restart`
+- `game:returnToLobby`
 - `team:propose`
 - `team:vote`
 - `mission:act`
@@ -378,8 +461,18 @@ Este evento se envía automáticamente después de:
 5. Asignar primeros N jugadores como espías
 6. Inicializar estado del juego:
    - Fase: "proposeTeam"
-   - Líder: índice 0
+   - Líder: índice especificado (por defecto 0)
    - Misión actual: 0
+
+### Reinicio del Juego (`GameState.restart`)
+
+1. Obtener el índice del líder actual
+2. Calcular el índice del siguiente líder: `(leaderIndex + 1) % players.length`
+3. Llamar a `GameState.start()` con el nuevo índice de líder
+4. El juego se reinicia con:
+   - Nuevos roles aleatorios (espías diferentes)
+   - El siguiente jugador como líder inicial
+   - Todos los demás estados reseteados (misiones, votos, etc.)
 
 ### Proponer Equipo (`GameState.proposeTeam`)
 
@@ -867,6 +960,9 @@ const amInTeam = publicState.proposedTeam.includes(socket.id);
   - `results.filter(r => r.passed).length >= 3` → Resistencia gana
   - `results.filter(r => !r.passed).length >= 3` → Espías ganan
   - `rejectedTeamsInRow >= 5` → Espías ganan
+- Botones para:
+  - "Reiniciar Partida" (nueva partida inmediata con nuevos roles)
+  - "Volver al Lobby" (resetear completamente, permite ajustar jugadores)
 
 ### 4. Usar `failsRequired[]` para Mostrar Información
 

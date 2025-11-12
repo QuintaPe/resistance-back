@@ -55,8 +55,61 @@ export function registerGameHandlers(io: Server, socket: Socket) {
             role: isSpy ? 'spy' : 'resistance',
             spies: isSpy ? room.state.spies : undefined
         };
-        
+
         console.log(`🔄 Enviando rol solicitado a ${player.name}: ${roleData.role}`);
         io.to(socket.id).emit('game:role', roleData);
+    });
+
+    socket.on('game:restart', ({ roomCode }, callback) => {
+        const room = RoomManager.getRoom(roomCode);
+        if (!room) return;
+
+        // Verificar que la partida haya terminado
+        if (room.state.phase !== 'reveal') {
+            callback?.({ error: 'La partida aún no ha terminado' });
+            return;
+        }
+
+        // Reiniciar el juego con el siguiente líder
+        GameState.restart(roomCode);
+
+        // Enviar el estado actualizado a todos
+        io.to(roomCode).emit('game:update', GameState.getPublicState(roomCode));
+
+        // Enviar roles privados a cada jugador
+        console.log('🎭 Enviando roles a jugadores (partida reiniciada). Espías:', room.state.spies);
+        room.players.forEach(player => {
+            const isSpy = room.state.spies.includes(player.id);
+            const roleData = {
+                role: isSpy ? 'spy' : 'resistance',
+                spies: isSpy ? room.state.spies : undefined
+            };
+            console.log(`  -> Jugador ${player.name} (${player.id}): ${roleData.role}`);
+            io.to(player.id).emit('game:role', roleData);
+        });
+
+        callback?.({ ok: true });
+    });
+
+    socket.on('game:returnToLobby', ({ roomCode }, callback) => {
+        const room = RoomManager.getRoom(roomCode);
+        if (!room) {
+            callback?.({ error: 'La sala no existe' });
+            return;
+        }
+
+        // Verificar que la partida haya terminado
+        if (room.state.phase !== 'reveal') {
+            callback?.({ error: 'La partida aún no ha terminado' });
+            return;
+        }
+
+        // Volver al lobby
+        GameState.returnToLobby(roomCode);
+
+        // Enviar el estado actualizado a todos
+        io.to(roomCode).emit('room:update', GameState.getPublicState(roomCode));
+
+        callback?.({ ok: true });
     });
 }

@@ -5,10 +5,17 @@ export type Player = {
     name: string;
 };
 
+export type DisconnectedPlayer = {
+    name: string;
+    wasSpy: boolean;
+};
+
 export type Room = {
     code: string;
     players: Player[];
     state: Game;            // estado de la partida
+    maxPlayers?: number;    // número de jugadores al inicio (solo se setea cuando empieza la partida)
+    disconnectedPlayers: Map<string, DisconnectedPlayer>; // id -> info del jugador desconectado
 };
 
 export type GamePhase =
