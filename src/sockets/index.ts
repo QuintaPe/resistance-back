@@ -14,7 +14,7 @@ export function initSocket(server: HttpServer): void {
     const io = new Server(server, {
         cors: { origin: "*" },
         // Configuración optimizada para móviles
-        pingTimeout: 60000,          // 60 segundos antes de considerar desconexión
+        pingTimeout: 300000,          // 5 minutos antes de considerar desconexión
         pingInterval: 25000,          // Verificar conexión cada 25 segundos
         connectTimeout: 45000,        // 45 segundos para establecer conexión
         transports: ['websocket', 'polling'],
