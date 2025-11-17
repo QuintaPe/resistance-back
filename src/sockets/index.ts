@@ -33,10 +33,21 @@ export function initSocket(server: HttpServer) {
             if (room) {
                 console.log(`Jugador ${socket.id} desconectándose de la sala ${room.code}`);
 
+                // Verificar si el jugador que se va es el creador
+                const wasCreator = RoomManager.isCreator(room.code, socket.id);
+
                 // Si está en el lobby, eliminar inmediatamente
                 if (room.state.phase === 'lobby') {
                     const updatedRoom = RoomManager.removePlayer(room.code, socket.id);
                     if (updatedRoom) {
+                        // Si era el creador, transferir el rol
+                        if (wasCreator) {
+                            RoomManager.transferCreator(room.code);
+                            io.to(room.code).emit('creator:changed', {
+                                message: 'El creador ha salido. Se ha transferido el rol.'
+                            });
+                        }
+                        
                         io.to(room.code).emit('room:update', RoomManager.getPublicState(room.code));
                         console.log(`Sala ${room.code} actualizada. Jugadores restantes: ${updatedRoom.players.length}`);
                     } else {
@@ -48,6 +59,14 @@ export function initSocket(server: HttpServer) {
                         // Callback cuando expira el timeout
                         const finalRoom = RoomManager.removePlayer(room.code, socket.id);
                         if (finalRoom) {
+                            // Si era el creador, transferir el rol
+                            if (wasCreator) {
+                                RoomManager.transferCreator(room.code);
+                                io.to(room.code).emit('creator:changed', {
+                                    message: 'El creador se desconectó permanentemente. Se ha transferido el rol.'
+                                });
+                            }
+                            
                             io.to(room.code).emit('room:update', RoomManager.getPublicState(room.code));
                             console.log(`⚠️ Jugador eliminado permanentemente. Sala ${room.code} actualizada.`);
                         } else {

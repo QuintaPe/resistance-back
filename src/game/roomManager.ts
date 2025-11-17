@@ -6,12 +6,13 @@ import { generateRoomCode } from "../utils/id";
 class RoomManagerClass {
     private rooms: Map<string, Room> = new Map();
 
-    createRoom() {
+    createRoom(creatorId: string) {
         const code = generateRoomCode();
 
         const room: Room = {
             code,
             players: [],
+            creatorId: creatorId,  // Guardar el ID del creador
             state: {
                 phase: "lobby",
                 leaderIndex: 0,
@@ -32,6 +33,7 @@ class RoomManagerClass {
         };
 
         this.rooms.set(code, room);
+        console.log(`🏠 Sala ${code} creada por ${creatorId}`);
         return room;
     }
 
@@ -93,6 +95,7 @@ class RoomManagerClass {
         return {
             code: room.code,
             players: room.players,
+            creatorId: room.creatorId,  // Incluir el ID del creador
             phase: state.phase,
             leaderIndex: state.leaderIndex,
             currentMission: state.currentMission,
@@ -147,22 +150,49 @@ class RoomManagerClass {
         const room = this.rooms.get(roomCode);
         if (!room) return;
 
-        // Obtener el primer jugador desconectado
+        // Obtener el primer jugador desconectado (FIFO)
         const disconnectedEntry = Array.from(room.disconnectedPlayers.entries())[0];
         if (!disconnectedEntry) return;
 
         const [oldSessionId, playerInfo] = disconnectedEntry;
 
-        // Si era espía, reemplazar en el array de spies
+        console.log(`🔄 Asignando rol de jugador desconectado a ${newPlayerId}`);
+        console.log(`  -> Jugador desconectado era: ${playerInfo.name} (espía: ${playerInfo.wasSpy})`);
+
+        // Si era espía, necesitamos agregar el nuevo socketId al array de spies
         if (playerInfo.wasSpy) {
-            const spyIndex = room.state.spies.indexOf(oldSessionId);
-            if (spyIndex !== -1) {
-                room.state.spies[spyIndex] = newPlayerId;
+            // Buscar y eliminar cualquier socket ID antiguo que ya no corresponda a jugadores activos
+            const oldSpyIds = room.state.spies.filter(spyId => {
+                // Un spyId es "antiguo" si no corresponde a ningún jugador activo Y no es el nuevo jugador
+                return !room.players.some(p => p.id === spyId) && spyId !== newPlayerId;
+            });
+
+            // Eliminar el primer socket ID antiguo (del jugador que se desconectó)
+            if (oldSpyIds.length > 0) {
+                const oldSocketId = oldSpyIds[0];
+                room.state.spies = room.state.spies.filter(spyId => spyId !== oldSocketId);
+                console.log(`  -> Eliminado socket ID antiguo ${oldSocketId} del array de espías`);
             }
+
+            // Agregar el nuevo socket ID al array de espías
+            if (!room.state.spies.includes(newPlayerId)) {
+                room.state.spies.push(newPlayerId);
+                console.log(`  -> Agregado ${newPlayerId} al array de espías`);
+            }
+        }
+
+        // Cancelar el timer si existe
+        const timer = room.disconnectTimers.get(oldSessionId);
+        if (timer) {
+            clearTimeout(timer);
+            room.disconnectTimers.delete(oldSessionId);
+            console.log(`  -> Timer cancelado para ${playerInfo.name}`);
         }
 
         // Eliminar de la lista de desconectados
         room.disconnectedPlayers.delete(oldSessionId);
+
+        console.log(`✅ Rol asignado exitosamente a nuevo jugador`);
     }
 
     // Buscar jugador por sessionId
@@ -287,6 +317,85 @@ class RoomManagerClass {
             clearTimeout(timer);
         }
         room.disconnectTimers.clear();
+    }
+
+    // Verificar si un jugador es el creador de la sala
+    isCreator(roomCode: string, playerId: string): boolean {
+        const room = this.rooms.get(roomCode);
+        if (!room) return false;
+
+        return room.creatorId === playerId;
+    }
+
+    // Expulsar a un jugador de la sala (solo puede hacerlo el creador)
+    kickPlayer(roomCode: string, creatorId: string, targetPlayerId: string): { success: boolean; error?: string } {
+        const room = this.rooms.get(roomCode);
+        
+        if (!room) {
+            return { success: false, error: "La sala no existe" };
+        }
+
+        // Verificar que quien expulsa es el creador
+        if (room.creatorId !== creatorId) {
+            return { success: false, error: "Solo el creador puede expulsar jugadores" };
+        }
+
+        // No puede expulsarse a sí mismo
+        if (targetPlayerId === creatorId) {
+            return { success: false, error: "El creador no puede expulsarse a sí mismo" };
+        }
+
+        // Verificar que el jugador objetivo existe en la sala
+        const targetPlayer = room.players.find(p => p.id === targetPlayerId);
+        if (!targetPlayer) {
+            return { success: false, error: "El jugador no está en la sala" };
+        }
+
+        console.log(`👢 ${creatorId} expulsando a ${targetPlayer.name} (${targetPlayerId}) de la sala ${roomCode}`);
+
+        // Si hay una partida en curso, limpiar el rol del jugador
+        if (room.state.phase !== 'lobby') {
+            // Eliminar de spies si era espía
+            room.state.spies = room.state.spies.filter(spyId => spyId !== targetPlayerId);
+            
+            // Limpiar votaciones pendientes
+            delete room.state.teamVotes[targetPlayerId];
+            delete room.state.missionActions[targetPlayerId];
+            room.state.votedPlayers = room.state.votedPlayers.filter(id => id !== targetPlayerId);
+            room.state.playersActed = room.state.playersActed.filter(id => id !== targetPlayerId);
+            
+            // Eliminar del equipo propuesto si estaba
+            room.state.proposedTeam = room.state.proposedTeam.filter(id => id !== targetPlayerId);
+        }
+
+        // Eliminar al jugador
+        room.players = room.players.filter(p => p.id !== targetPlayerId);
+
+        // Limpiar timer si existe
+        if (targetPlayer.sessionId) {
+            const timer = room.disconnectTimers.get(targetPlayer.sessionId);
+            if (timer) {
+                clearTimeout(timer);
+                room.disconnectTimers.delete(targetPlayer.sessionId);
+            }
+            room.disconnectedPlayers.delete(targetPlayer.sessionId);
+        }
+
+        console.log(`✅ Jugador ${targetPlayer.name} expulsado exitosamente`);
+        return { success: true };
+    }
+
+    // Transferir el rol de creador a otro jugador (se llama automáticamente si el creador se va)
+    transferCreator(roomCode: string): void {
+        const room = this.rooms.get(roomCode);
+        if (!room || room.players.length === 0) return;
+
+        // El primer jugador en la lista se convierte en el nuevo creador
+        const newCreator = room.players[0];
+        const oldCreatorId = room.creatorId;
+        room.creatorId = newCreator.id;
+
+        console.log(`👑 Rol de creador transferido de ${oldCreatorId} a ${newCreator.name} (${newCreator.id})`);
     }
 }
 

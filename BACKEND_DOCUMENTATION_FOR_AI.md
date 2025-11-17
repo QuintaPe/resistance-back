@@ -89,9 +89,19 @@ Representa una sala de juego.
 type Room = {
     code: string;           // Código de 5 letras (ej: "ABCDE")
     players: Player[];      // Lista de jugadores
+    creatorId: string;      // ID del jugador que creó la sala (puede expulsar jugadores)
     state: Game;            // Estado actual del juego
+    maxPlayers?: number;    // Número máximo de jugadores (se setea al iniciar)
+    disconnectedPlayers: Map<string, DisconnectedPlayer>; // Jugadores desconectados
+    disconnectTimers: Map<string, NodeJS.Timeout>;       // Timers de reconexión
 };
 ```
+
+⚠️ **Nota sobre el Creador**:
+- El creador es el jugador que creó la sala
+- Solo el creador puede **expulsar otros jugadores**
+- Si el creador se desconecta/sale, el rol se transfiere automáticamente al siguiente jugador
+- El creador es **diferente** del líder (que cambia cada ronda)
 
 ### GamePhase
 Fases posibles del juego.
@@ -240,7 +250,72 @@ socket.emit('room:join',
 
 ---
 
-### 3. Iniciar Juego
+### 3. Expulsar Jugador (Solo Creador)
+
+**Evento del Cliente**: `player:kick`
+
+```typescript
+socket.emit('player:kick', 
+    { 
+        roomCode: "ABCDE", 
+        targetPlayerId: "socket-id-del-jugador"
+    }, 
+    (response) => {
+        if (response.error) {
+            // Error: "Solo el creador puede expulsar jugadores"
+            console.error(response.error);
+        } else {
+            // response: { success: true }
+            console.log('Jugador expulsado exitosamente');
+        }
+    }
+);
+```
+
+**Requisitos**:
+- Solo el **creador de la sala** puede expulsar jugadores
+- El creador no puede expulsarse a sí mismo
+- El jugador objetivo debe estar en la sala
+
+**Respuesta (Callback)**:
+```typescript
+{
+    success?: boolean;
+    error?: string;  // "Solo el creador puede expulsar jugadores" | "El jugador no está en la sala" | etc.
+}
+```
+
+**Eventos Emitidos**:
+
+1. **Al jugador expulsado**: `player:kicked`
+```typescript
+socket.on('player:kicked', (data) => {
+    // data: { message: 'Has sido expulsado de la sala por el creador' }
+    alert(data.message);
+    // Redirigir al lobby
+});
+```
+
+2. **A todos en la sala**: `room:update`
+```typescript
+// Todos los jugadores restantes reciben el estado actualizado
+socket.on('room:update', (state) => {
+    // state ya no incluye al jugador expulsado
+});
+```
+
+**Comportamiento**:
+- Si hay una partida en curso:
+  - Se elimina del array de espías (si era espía)
+  - Se limpian sus votaciones pendientes
+  - Se elimina del equipo propuesto (si estaba)
+  - Se limpian sus acciones de misión
+- El jugador es removido de la sala
+- Se desconecta automáticamente del room de Socket.IO
+
+---
+
+### 4. Iniciar Juego
 
 **Evento del Cliente**: `game:start`
 
@@ -357,7 +432,7 @@ socket.emit('mission:act', {
 
 ---
 
-### 7. Reiniciar Partida
+### 7. Reiniciar Partida (Creador tiene permiso especial)
 
 **Evento del Cliente**: `game:restart`
 
@@ -366,7 +441,7 @@ socket.emit('game:restart',
     { roomCode: "ABCDE" }, 
     (response) => {
         if (response.error) {
-            // Error: "La partida aún no ha terminado"
+            // Error: "Solo el creador puede reiniciar la partida antes de que termine"
         } else {
             // response: { ok: true }
         }
@@ -375,13 +450,17 @@ socket.emit('game:restart',
 ```
 
 **Requisitos**:
-- La partida debe estar en fase "reveal" (terminada)
+- **Creador**: Puede reiniciar en **cualquier momento**
+- **Otros jugadores**: Solo cuando la partida está en fase "reveal" (terminada)
 
 **Efecto**:
 - Reinicia el juego con nuevos roles aleatorios
 - El líder inicial será el siguiente jugador después del líder anterior
 - Mantiene a todos los jugadores en la sala
 - Cambia la fase a "proposeTeam"
+- Envía nuevos roles a todos los jugadores
+
+⚠️ **Nota**: Esta es una acción **especial del creador**. Permite reiniciar la partida incluso si hay un problema o quieren empezar de nuevo.
 
 **Respuesta (Callback)**:
 ```typescript
@@ -395,7 +474,7 @@ socket.emit('game:restart',
 
 ---
 
-### 8. Volver al Lobby
+### 8. Volver al Lobby (Creador tiene permiso especial)
 
 **Evento del Cliente**: `game:returnToLobby`
 
@@ -404,7 +483,7 @@ socket.emit('game:returnToLobby',
     { roomCode: "ABCDE" }, 
     (response) => {
         if (response.error) {
-            // Error: "La partida aún no ha terminado"
+            // Error: "Solo el creador puede volver al lobby antes de que termine la partida"
         } else {
             // response: { ok: true }
         }
@@ -413,14 +492,18 @@ socket.emit('game:returnToLobby',
 ```
 
 **Requisitos**:
-- La partida debe estar en fase "reveal" (terminada)
+- **Creador**: Puede volver al lobby en **cualquier momento**
+- **Otros jugadores**: Solo cuando la partida está en fase "reveal" (terminada)
 
 **Efecto**:
 - Resetea completamente el estado del juego a "lobby"
 - Limpia todos los datos de la partida (roles, misiones, votos, etc.)
+- Limpia la lista de jugadores desconectados
 - Permite que nuevos jugadores se unan a la sala
 - Mantiene a todos los jugadores actuales en la sala
 - Los jugadores pueden comenzar una nueva partida desde cero
+
+⚠️ **Nota**: Esta es una acción **especial del creador**. Útil para cancelar una partida si hay problemas o para reiniciar completamente.
 
 **Respuesta (Callback)**:
 ```typescript

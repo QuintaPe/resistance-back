@@ -16,6 +16,7 @@ export type DisconnectedPlayer = {
 export type Room = {
     code: string;
     players: Player[];
+    creatorId: string;      // ID del jugador que creó la sala (tiene permisos especiales)
     state: Game;            // estado de la partida
     maxPlayers?: number;    // número de jugadores al inicio (solo se setea cuando empieza la partida)
     disconnectedPlayers: Map<string, DisconnectedPlayer>; // sessionId -> info del jugador desconectado

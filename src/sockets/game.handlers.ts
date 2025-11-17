@@ -103,13 +103,20 @@ export function registerGameHandlers(io: Server, socket: Socket) {
 
     socket.on('game:restart', ({ roomCode }, callback) => {
         const room = RoomManager.getRoom(roomCode);
-        if (!room) return;
-
-        // Verificar que la partida haya terminado
-        if (room.state.phase !== 'reveal') {
-            callback?.({ error: 'La partida aún no ha terminado' });
+        if (!room) {
+            callback?.({ error: 'La sala no existe' });
             return;
         }
+
+        const isCreator = RoomManager.isCreator(roomCode, socket.id);
+
+        // Verificar permisos: el creador puede reiniciar en cualquier momento
+        if (!isCreator && room.state.phase !== 'reveal') {
+            callback?.({ error: 'Solo el creador puede reiniciar la partida antes de que termine' });
+            return;
+        }
+
+        console.log(`🔄 ${isCreator ? 'Creador' : 'Jugador'} reiniciando partida en sala ${roomCode}`);
 
         // Reiniciar el juego con el siguiente líder
         GameState.restart(roomCode);
@@ -139,11 +146,15 @@ export function registerGameHandlers(io: Server, socket: Socket) {
             return;
         }
 
-        // Verificar que la partida haya terminado
-        if (room.state.phase !== 'reveal') {
-            callback?.({ error: 'La partida aún no ha terminado' });
+        const isCreator = RoomManager.isCreator(roomCode, socket.id);
+
+        // Verificar permisos: el creador puede volver al lobby en cualquier momento
+        if (!isCreator && room.state.phase !== 'reveal') {
+            callback?.({ error: 'Solo el creador puede volver al lobby antes de que termine la partida' });
             return;
         }
+
+        console.log(`🏠 ${isCreator ? 'Creador' : 'Jugador'} regresando al lobby en sala ${roomCode}`);
 
         // Volver al lobby
         GameState.returnToLobby(roomCode);
