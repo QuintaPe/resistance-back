@@ -123,7 +123,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         // Notificar a todos en la sala
         const updatedState = RoomManager.getPublicState(roomCode);
         io.to(roomCode).emit('room:update', updatedState);
-        
+
         callback?.({ success: true });
         console.log(`✅ Expulsión completada exitosamente`);
     });

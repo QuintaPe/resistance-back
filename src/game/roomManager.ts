@@ -330,7 +330,7 @@ class RoomManagerClass {
     // Expulsar a un jugador de la sala (solo puede hacerlo el creador)
     kickPlayer(roomCode: string, creatorId: string, targetPlayerId: string): { success: boolean; error?: string } {
         const room = this.rooms.get(roomCode);
-        
+
         if (!room) {
             return { success: false, error: "La sala no existe" };
         }
@@ -357,13 +357,13 @@ class RoomManagerClass {
         if (room.state.phase !== 'lobby') {
             // Eliminar de spies si era espía
             room.state.spies = room.state.spies.filter(spyId => spyId !== targetPlayerId);
-            
+
             // Limpiar votaciones pendientes
             delete room.state.teamVotes[targetPlayerId];
             delete room.state.missionActions[targetPlayerId];
             room.state.votedPlayers = room.state.votedPlayers.filter(id => id !== targetPlayerId);
             room.state.playersActed = room.state.playersActed.filter(id => id !== targetPlayerId);
-            
+
             // Eliminar del equipo propuesto si estaba
             room.state.proposedTeam = room.state.proposedTeam.filter(id => id !== targetPlayerId);
         }
