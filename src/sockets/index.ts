@@ -73,6 +73,12 @@ export function initSocket(server: HttpServer) {
                             });
                         }
                         
+                        // Emitir evento de eliminación permanente
+                        io.to(room.code).emit('player:removed', {
+                            playerId: sessionId,
+                            message: 'Un jugador ha sido eliminado por inactividad'
+                        });
+                        
                         io.to(room.code).emit('room:update', RoomManager.getPublicState(room.code));
                         console.log(`⚠️ Jugador eliminado permanentemente. Sala ${room.code} actualizada.`);
                     } else {
@@ -84,8 +90,9 @@ export function initSocket(server: HttpServer) {
                 // Notificar inmediatamente que el jugador está desconectado
                 io.to(room.code).emit('room:update', RoomManager.getPublicState(room.code));
                 io.to(room.code).emit('player:disconnected', {
-                    playerId: sessionId, // ✅ Usar sessionId como playerId
-                    message: 'Un jugador se ha desconectado temporalmente'
+                    playerId: sessionId,
+                    message: 'Un jugador se ha desconectado temporalmente',
+                    isTemporary: true // ⭐ Indica que es una desconexión temporal
                 });
             }
         });

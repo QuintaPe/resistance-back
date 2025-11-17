@@ -4,6 +4,8 @@ export type Player = {
     id: string;         // sessionId - identificador persistente del jugador
     sessionId?: string; // alias explícito para compatibilidad (apunta al mismo valor que id)
     name: string;
+    connected: boolean; // ⭐ indica si el jugador está conectado actualmente
+    disconnectedAt: Date | null; // ⭐ timestamp de cuándo se desconectó
 };
 
 export type DisconnectedPlayer = {

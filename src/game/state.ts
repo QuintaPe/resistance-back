@@ -6,6 +6,22 @@ import { shuffle } from "../utils/shuffle";
 import { getTeamSizes, getNumSpies, getFailsRequired } from "./rules";
 
 class GameStateClass {
+    // Obtener el siguiente líder conectado (salta jugadores desconectados)
+    private getNextConnectedLeaderIndex(players: Player[], currentIndex: number): number {
+        const connectedPlayers = players.filter(p => p.connected);
+        if (connectedPlayers.length === 0) return 0; // Fallback si no hay jugadores conectados
+        
+        let nextIndex = (currentIndex + 1) % players.length;
+        let attempts = 0;
+        
+        // Buscar el siguiente jugador conectado (con límite para evitar loops infinitos)
+        while (!players[nextIndex].connected && attempts < players.length) {
+            nextIndex = (nextIndex + 1) % players.length;
+            attempts++;
+        }
+        
+        return nextIndex;
+    }
     start(roomCode: string, initialLeaderIndex: number = 0) {
         const room = RoomManager.getRoom(roomCode);
         if (!room) return;
@@ -99,6 +115,13 @@ class GameStateClass {
         const state = room.state;
         const leader = room.players[state.leaderIndex];
 
+        // Verificar que el líder esté conectado
+        if (!leader.connected) {
+            // Si el líder actual no está conectado, pasar al siguiente
+            state.leaderIndex = this.getNextConnectedLeaderIndex(room.players, state.leaderIndex);
+            return;
+        }
+
         // leader.id ES sessionId
         if (leader.id !== leaderSessionId) return;
         if (state.phase !== "proposeTeam") return;
@@ -116,6 +139,10 @@ class GameStateClass {
         const state = room.state;
         if (state.phase !== "voteTeam") return;
 
+        // ✅ Verificar que el jugador esté conectado
+        const player = room.players.find(p => p.id === playerSessionId);
+        if (!player || !player.connected) return;
+
         state.teamVotes[playerSessionId] = vote;
 
         // Agregar el jugador a votedPlayers si no está ya
@@ -123,14 +150,14 @@ class GameStateClass {
             state.votedPlayers.push(playerSessionId);
         }
 
-        // Comprobar si todos votaron
-        // player.id ES sessionId
-        const allVoted = room.players.every((p) => state.teamVotes[p.id]);
+        // Comprobar si todos los jugadores CONECTADOS votaron
+        const connectedPlayers = room.players.filter(p => p.connected);
+        const allVoted = connectedPlayers.every((p) => state.teamVotes[p.id]);
 
         if (!allVoted) return;
 
         const approvals = Object.values(state.teamVotes).filter((v) => v === "approve").length;
-        const passed = approvals > room.players.length / 2;
+        const passed = approvals > connectedPlayers.length / 2;
 
         if (!passed) {
             state.rejectedTeamsInRow += 1;
@@ -141,7 +168,8 @@ class GameStateClass {
                 return;
             }
 
-            state.leaderIndex = (state.leaderIndex + 1) % room.players.length;
+            // Pasar al siguiente líder conectado
+            state.leaderIndex = this.getNextConnectedLeaderIndex(room.players, state.leaderIndex);
             state.phase = "proposeTeam";
             state.votedPlayers = []; // Limpiar para la próxima votación
             return;
@@ -161,6 +189,10 @@ class GameStateClass {
         const state = room.state;
         if (state.phase !== "mission") return;
         if (!state.proposedTeam.includes(playerSessionId)) return;
+
+        // ✅ Verificar que el jugador esté conectado
+        const player = room.players.find(p => p.id === playerSessionId);
+        if (!player || !player.connected) return;
 
         const isSpy = state.spies.includes(playerSessionId);
         if (action === "fail" && !isSpy) return;
@@ -202,7 +234,8 @@ class GameStateClass {
             return;
         }
 
-        state.leaderIndex = (state.leaderIndex + 1) % room.players.length;
+        // Pasar al siguiente líder conectado
+        state.leaderIndex = this.getNextConnectedLeaderIndex(room.players, state.leaderIndex);
         state.phase = "proposeTeam";
     }
 }

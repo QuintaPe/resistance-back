@@ -50,17 +50,19 @@ class RoomManagerClass {
         const finalSessionId = sessionId || this.generateSessionId();
 
         // player.id ES el sessionId (no el socket.id)
-        room.players.push({ 
-            id: finalSessionId, 
+        room.players.push({
+            id: finalSessionId,
             sessionId: finalSessionId, // alias explícito para compatibilidad
-            name 
+            name,
+            connected: true, // ⭐ nuevo jugador está conectado
+            disconnectedAt: null // ⭐ no tiene desconexión previa
         });
-        
+
         // Guardar el mapeo sessionId → socket.id actual
         room.socketMapping.set(finalSessionId, socketId);
 
         console.log(`✅ Jugador agregado: ${name} (sessionId: ${finalSessionId}, socketId: ${socketId})`);
-        
+
         return finalSessionId;
     }
 
@@ -71,13 +73,13 @@ class RoomManagerClass {
     removePlayer(roomCode: string, sessionId: string) {
         const room = this.rooms.get(roomCode);
         if (!room) return null;
-        
+
         // Eliminar el jugador de la lista (player.id ES sessionId)
         room.players = room.players.filter(p => p.id !== sessionId);
 
         // Eliminar del array de spies si era espía
         room.state.spies = room.state.spies.filter(spyId => spyId !== sessionId);
-        
+
         // Eliminar del mapeo de sockets
         room.socketMapping.delete(sessionId);
 
@@ -106,7 +108,7 @@ class RoomManagerClass {
     // Buscar sala por socketId actual
     findRoomBySocketId(socketId: string): Room | null {
         for (const room of this.rooms.values()) {
-            if (room.socketMapping.has(socketId) || 
+            if (room.socketMapping.has(socketId) ||
                 Array.from(room.socketMapping.values()).includes(socketId)) {
                 return room;
             }
@@ -134,7 +136,13 @@ class RoomManagerClass {
 
         return {
             code: room.code,
-            players: room.players,
+            // ⭐ TODOS los jugadores (conectados y desconectados), pero sin propiedades internas
+            players: room.players.map(p => ({
+                id: p.id,
+                sessionId: p.sessionId,
+                name: p.name
+                // No enviamos 'connected' ni 'disconnectedAt' - el frontend lo deduce
+            })),
             creatorId: room.creatorId,  // Incluir el ID del creador
             phase: state.phase,
             leaderIndex: state.leaderIndex,
@@ -171,20 +179,20 @@ class RoomManagerClass {
 
         return room.players.find(p => p.id === sessionId) || null;
     }
-    
+
     // Obtener socketId actual de un jugador
     getSocketId(roomCode: string, sessionId: string): string | null {
         const room = this.rooms.get(roomCode);
         if (!room) return null;
-        
+
         return room.socketMapping.get(sessionId) || null;
     }
-    
+
     // Actualizar el socketId de un jugador (usado en reconexión)
     updateSocketId(roomCode: string, sessionId: string, newSocketId: string): boolean {
         const room = this.rooms.get(roomCode);
         if (!room) return false;
-        
+
         room.socketMapping.set(sessionId, newSocketId);
         console.log(`🔄 Socket actualizado: sessionId ${sessionId} → socketId ${newSocketId}`);
         return true;
@@ -203,36 +211,30 @@ class RoomManagerClass {
         const room = this.rooms.get(roomCode);
         if (!room) return false;
 
-        // Buscar si hay un jugador desconectado con este sessionId
-        const disconnectedPlayer = room.disconnectedPlayers.get(sessionId);
-        if (!disconnectedPlayer) return false;
+        // Buscar el jugador en la lista (ahora se mantiene en room.players aunque esté desconectado)
+        const player = room.players.find(p => p.id === sessionId);
+        if (!player) return false;
 
-        console.log(`🔄 Reconectando jugador ${disconnectedPlayer.name} (sessionId: ${sessionId})`);
-        console.log(`  -> Índice original: ${disconnectedPlayer.playerIndex}, Socket nuevo: ${newSocketId}`);
+        console.log(`🔄 Reconectando jugador ${player.name} (sessionId: ${sessionId})`);
 
         // Cancelar el timer de desconexión si existe
         const timer = room.disconnectTimers.get(sessionId);
         if (timer) {
             clearTimeout(timer);
             room.disconnectTimers.delete(sessionId);
-            console.log(`⏰ Timer de desconexión cancelado para ${disconnectedPlayer.name}`);
+            console.log(`⏰ Timer de desconexión cancelado para ${player.name}`);
         }
 
-        // Restaurar el jugador en su posición original
-        // ✨ player.id ES sessionId, nunca cambia
-        room.players.splice(disconnectedPlayer.playerIndex, 0, {
-            id: sessionId,  // player.id ES el sessionId
-            sessionId: sessionId, // alias explícito para compatibilidad
-            name: disconnectedPlayer.name
-        });
-        
+        // ✅ MARCAR como conectado nuevamente
+        player.connected = true;
+        player.disconnectedAt = null;
+
         // Actualizar el socketMapping con el nuevo socket.id
         room.socketMapping.set(sessionId, newSocketId);
 
-        console.log(`📍 Jugador restaurado en índice ${disconnectedPlayer.playerIndex}`);
-        console.log(`✅ ${disconnectedPlayer.name} reconectado exitosamente (player.id=${sessionId} persiste, socketId actualizado a ${newSocketId})`);
+        console.log(`✅ ${player.name} reconectado exitosamente (sessionId=${sessionId} persiste, socketId actualizado a ${newSocketId})`);
 
-        // Eliminar de la lista de desconectados
+        // Eliminar de la lista de desconectados si estaba allí
         room.disconnectedPlayers.delete(sessionId);
 
         return true;
@@ -251,19 +253,28 @@ class RoomManagerClass {
                 break;
             }
         }
-        
+
         if (!playerSessionId) return;
 
         // Buscar el jugador por sessionId (player.id)
         const playerIndex = room.players.findIndex(p => p.id === playerSessionId);
         if (playerIndex === -1) return;
-        
+
         const player = room.players[playerIndex];
 
-        // Si la partida ya comenzó, guardar información del jugador
+        // ✅ MARCAR como desconectado, NO eliminar del array
+        player.connected = false;
+        player.disconnectedAt = new Date();
+        
+        // Limpiar el socketId actual (ya no está conectado)
+        room.socketMapping.delete(playerSessionId);
+
+        console.log(`⏳ Jugador ${player.name} marcado como desconectado (sessionId: ${playerSessionId}). Esperando reconexión (5 minutos)...`);
+
+        // Si la partida ya comenzó, guardar información adicional del jugador
         if (room.state.phase !== 'lobby') {
             const wasSpy = room.state.spies.includes(playerSessionId);
-            
+
             room.disconnectedPlayers.set(playerSessionId, {
                 name: player.name,
                 wasSpy,
@@ -272,31 +283,25 @@ class RoomManagerClass {
                 playerIndex: playerIndex // Guardar el índice original
             });
 
-            console.log(`⏳ Jugador ${player.name} desconectado temporalmente (índice: ${playerIndex}, sessionId: ${playerSessionId}). Esperando reconexión (30s)...`);
-
-            // Configurar timeout de 30 segundos
+            // Configurar timeout de 5 minutos (300000 ms)
             const timeout = setTimeout(() => {
                 console.log(`⏰ Timeout alcanzado para ${player.name}. Eliminando permanentemente...`);
-                
+
                 // Eliminar del array de spies si era espía (usando sessionId)
                 if (wasSpy) {
                     room.state.spies = room.state.spies.filter(spyId => spyId !== playerSessionId);
                     console.log(`🕵️ Eliminado ${playerSessionId} del array de espías`);
                 }
-                
+
                 room.disconnectedPlayers.delete(playerSessionId!);
                 room.disconnectTimers.delete(playerSessionId!);
-                // También limpiar el socketMapping
-                room.socketMapping.delete(playerSessionId!);
                 onTimeout();
-            }, 30000); // 30 segundos
+            }, 300000); // 5 minutos
 
             room.disconnectTimers.set(playerSessionId, timeout);
         }
-
-        // Remover el jugador de la lista activa (pero mantener socketMapping para futura reconexión)
-        room.players.splice(playerIndex, 1);
-        console.log(`📤 Jugador removido del índice ${playerIndex} (socketMapping se mantiene para reconexión)`);
+        
+        // ⭐ EL JUGADOR SE MANTIENE EN room.players, solo está marcado como desconectado
     }
 
     // Limpiar todos los timers de una sala
@@ -348,16 +353,16 @@ class RoomManagerClass {
         if (room.state.phase !== 'lobby') {
             // Eliminar de spies si era espía (targetPlayerId ES sessionId)
             room.state.spies = room.state.spies.filter(spyId => spyId !== targetPlayerId);
-            
+
             // Limpiar votaciones pendientes
             delete room.state.teamVotes[targetPlayerId];
             delete room.state.missionActions[targetPlayerId];
             room.state.votedPlayers = room.state.votedPlayers.filter(id => id !== targetPlayerId);
             room.state.playersActed = room.state.playersActed.filter(id => id !== targetPlayerId);
-            
+
             // Eliminar del equipo propuesto si estaba
             room.state.proposedTeam = room.state.proposedTeam.filter(id => id !== targetPlayerId);
-            
+
             console.log(`🧹 Limpiado datos de partida para sessionId: ${targetPlayerId}`);
         }
 
