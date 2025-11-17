@@ -100,6 +100,8 @@ type Room = {
 ⚠️ **Nota sobre el Creador**:
 - El creador es el jugador que creó la sala
 - Solo el creador puede **expulsar otros jugadores**
+- Solo el creador puede **cambiar el líder inicial** en el lobby
+- Solo el creador puede **reiniciar la partida** o **volver al lobby** en cualquier momento
 - Si el creador se desconecta/sale, el rol se transfiere automáticamente al siguiente jugador
 - El creador es **diferente** del líder (que cambia cada ronda)
 
@@ -315,7 +317,63 @@ socket.on('room:update', (state) => {
 
 ---
 
-### 4. Iniciar Juego
+### 4. Cambiar Líder Inicial (Solo Creador, Solo en Lobby)
+
+**Evento del Cliente**: `room:changeLeader`
+
+```typescript
+socket.emit('room:changeLeader', 
+    { 
+        roomCode: "ABCDE", 
+        newLeaderIndex: 2  // Índice del jugador en el array players
+    }, 
+    (response) => {
+        if (response.error) {
+            // Error: "Solo el creador puede cambiar el líder"
+            console.error(response.error);
+        } else {
+            // response: { success: true }
+            console.log('Líder cambiado exitosamente');
+        }
+    }
+);
+```
+
+**Requisitos**:
+- Solo el **creador de la sala** puede cambiar el líder
+- Solo se puede cambiar **en el lobby** (antes de iniciar)
+- El `newLeaderIndex` debe ser válido (0 hasta players.length - 1)
+
+**Respuesta (Callback)**:
+```typescript
+{
+    success?: boolean;
+    error?: string;  // "Solo el creador puede cambiar el líder" | "Solo se puede cambiar el líder en el lobby" | etc.
+}
+```
+
+**Broadcast a la Sala**: `room:update`
+
+```typescript
+socket.on('room:update', (state) => {
+    // state.leaderIndex ahora tiene el nuevo valor
+    const leader = state.players[state.leaderIndex];
+    console.log(`Nuevo líder inicial: ${leader.name}`);
+});
+```
+
+**Comportamiento**:
+- Valida que quien envía es el creador
+- Valida que está en fase "lobby"
+- Actualiza `room.state.leaderIndex` con el nuevo índice
+- El jugador en esa posición será el líder inicial cuando comience la partida
+- Envía `room:update` a todos
+
+⚠️ **Nota**: Esta es una acción **especial del creador**. Útil para decidir quién empieza como líder antes de iniciar la partida.
+
+---
+
+### 5. Iniciar Juego
 
 **Evento del Cliente**: `game:start`
 

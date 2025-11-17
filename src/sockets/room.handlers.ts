@@ -127,4 +127,44 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         callback?.({ success: true });
         console.log(`✅ Expulsión completada exitosamente`);
     });
+
+    // Cambiar el líder (solo el creador, solo en lobby)
+    socket.on('room:changeLeader', ({ roomCode, newLeaderIndex }, callback) => {
+        console.log(`📩 Solicitud de cambio de líder recibida de ${socket.id} en sala ${roomCode}`);
+
+        const room = RoomManager.getRoom(roomCode);
+
+        if (!room) {
+            return callback?.({ error: "La sala no existe" });
+        }
+
+        // Validar que quien envía es el creador
+        if (!RoomManager.isCreator(roomCode, socket.id)) {
+            return callback?.({ error: "Solo el creador puede cambiar el líder" });
+        }
+
+        // Validar que está en fase "lobby"
+        if (room.state.phase !== 'lobby') {
+            return callback?.({ error: "Solo se puede cambiar el líder en el lobby" });
+        }
+
+        // Verificar que el índice es válido
+        if (newLeaderIndex < 0 || newLeaderIndex >= room.players.length) {
+            return callback?.({ error: "Índice de líder inválido" });
+        }
+
+        // Actualizar room.state.leaderIndex
+        const oldLeaderIndex = room.state.leaderIndex;
+        room.state.leaderIndex = newLeaderIndex;
+
+        const newLeader = room.players[newLeaderIndex];
+        const oldLeader = room.players[oldLeaderIndex];
+
+        console.log(`👑 Líder cambiado de ${oldLeader?.name || 'N/A'} (índice ${oldLeaderIndex}) a ${newLeader.name} (índice ${newLeaderIndex})`);
+
+        // Enviar room:update a todos
+        io.to(roomCode).emit('room:update', RoomManager.getPublicState(roomCode));
+
+        callback?.({ success: true });
+    });
 }
