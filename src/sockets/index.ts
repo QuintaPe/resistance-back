@@ -28,60 +28,65 @@ export function initSocket(server: HttpServer) {
         socket.on('disconnect', (reason) => {
             console.log(`Socket desconectado: ${socket.id}, razón: ${reason}`);
 
-            // Buscar la sala del jugador
-            const room = RoomManager.findRoomByPlayerId(socket.id);
-            if (room) {
-                console.log(`Jugador ${socket.id} desconectándose de la sala ${room.code}`);
+            // Buscar la sala del jugador por socketId
+            const room = RoomManager.findRoomBySocketId(socket.id);
+            if (!room) return;
 
-                // Verificar si el jugador que se va es el creador
-                const wasCreator = RoomManager.isCreator(room.code, socket.id);
+            // Obtener el sessionId del socket
+            const sessionData = RoomManager.getSessionIdFromSocket(socket.id);
+            if (!sessionData) return;
 
-                // Si está en el lobby, eliminar inmediatamente
-                if (room.state.phase === 'lobby') {
-                    const updatedRoom = RoomManager.removePlayer(room.code, socket.id);
-                    if (updatedRoom) {
+            const sessionId = sessionData.sessionId;
+            console.log(`Jugador ${sessionId} (socket: ${socket.id}) desconectándose de la sala ${room.code}`);
+
+            // Verificar si el jugador que se va es el creador
+            const wasCreator = RoomManager.isCreator(room.code, sessionId);
+
+            // Si está en el lobby, eliminar inmediatamente
+            if (room.state.phase === 'lobby') {
+                const updatedRoom = RoomManager.removePlayer(room.code, sessionId);
+                if (updatedRoom) {
+                    // Si era el creador, transferir el rol
+                    if (wasCreator) {
+                        RoomManager.transferCreator(room.code);
+                        io.to(room.code).emit('creator:changed', {
+                            message: 'El creador ha salido. Se ha transferido el rol.'
+                        });
+                    }
+                    
+                    io.to(room.code).emit('room:update', RoomManager.getPublicState(room.code));
+                    console.log(`Sala ${room.code} actualizada. Jugadores restantes: ${updatedRoom.players.length}`);
+                } else {
+                    console.log(`Sala ${room.code} eliminada (quedó vacía)`);
+                }
+            } else {
+                // Partida en curso - dar tiempo para reconexión
+                RoomManager.markPlayerDisconnected(room.code, socket.id, () => {
+                    // Callback cuando expira el timeout
+                    const finalRoom = RoomManager.removePlayer(room.code, sessionId);
+                    if (finalRoom) {
                         // Si era el creador, transferir el rol
                         if (wasCreator) {
                             RoomManager.transferCreator(room.code);
                             io.to(room.code).emit('creator:changed', {
-                                message: 'El creador ha salido. Se ha transferido el rol.'
+                                message: 'El creador se desconectó permanentemente. Se ha transferido el rol.'
                             });
                         }
                         
                         io.to(room.code).emit('room:update', RoomManager.getPublicState(room.code));
-                        console.log(`Sala ${room.code} actualizada. Jugadores restantes: ${updatedRoom.players.length}`);
+                        console.log(`⚠️ Jugador eliminado permanentemente. Sala ${room.code} actualizada.`);
                     } else {
+                        RoomManager.clearRoomTimers(room.code);
                         console.log(`Sala ${room.code} eliminada (quedó vacía)`);
                     }
-                } else {
-                    // Partida en curso - dar tiempo para reconexión
-                    RoomManager.markPlayerDisconnected(room.code, socket.id, () => {
-                        // Callback cuando expira el timeout
-                        const finalRoom = RoomManager.removePlayer(room.code, socket.id);
-                        if (finalRoom) {
-                            // Si era el creador, transferir el rol
-                            if (wasCreator) {
-                                RoomManager.transferCreator(room.code);
-                                io.to(room.code).emit('creator:changed', {
-                                    message: 'El creador se desconectó permanentemente. Se ha transferido el rol.'
-                                });
-                            }
-                            
-                            io.to(room.code).emit('room:update', RoomManager.getPublicState(room.code));
-                            console.log(`⚠️ Jugador eliminado permanentemente. Sala ${room.code} actualizada.`);
-                        } else {
-                            RoomManager.clearRoomTimers(room.code);
-                            console.log(`Sala ${room.code} eliminada (quedó vacía)`);
-                        }
-                    });
+                });
 
-                    // Notificar inmediatamente que el jugador está desconectado
-                    io.to(room.code).emit('room:update', RoomManager.getPublicState(room.code));
-                    io.to(room.code).emit('player:disconnected', {
-                        playerId: socket.id,
-                        message: 'Un jugador se ha desconectado temporalmente'
-                    });
-                }
+                // Notificar inmediatamente que el jugador está desconectado
+                io.to(room.code).emit('room:update', RoomManager.getPublicState(room.code));
+                io.to(room.code).emit('player:disconnected', {
+                    playerId: sessionId, // ✅ Usar sessionId como playerId
+                    message: 'Un jugador se ha desconectado temporalmente'
+                });
             }
         });
     });

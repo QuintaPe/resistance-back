@@ -19,7 +19,8 @@ class GameStateClass {
 
         const shuffled = shuffle([...players]);
         // Usar sessionId para los espías (persiste entre reconexiones)
-        const spies = shuffled.slice(0, numSpies).map((p: Player) => p.sessionId!);
+        // player.id ES sessionId
+        const spies = shuffled.slice(0, numSpies).map((p: Player) => p.id);
         console.log('🕵️ Espías asignados (sessionIds):', spies);
         room.state = {
             phase: "proposeTeam",
@@ -98,7 +99,8 @@ class GameStateClass {
         const state = room.state;
         const leader = room.players[state.leaderIndex];
 
-        if (leader.sessionId !== leaderSessionId) return;
+        // leader.id ES sessionId
+        if (leader.id !== leaderSessionId) return;
         if (state.phase !== "proposeTeam") return;
 
         state.proposedTeam = teamSessionIds;
@@ -122,7 +124,8 @@ class GameStateClass {
         }
 
         // Comprobar si todos votaron
-        const allVoted = room.players.every((p) => state.teamVotes[p.sessionId!]);
+        // player.id ES sessionId
+        const allVoted = room.players.every((p) => state.teamVotes[p.id]);
 
         if (!allVoted) return;
 

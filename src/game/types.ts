@@ -1,9 +1,9 @@
 // src/game/types.ts
 
 export type Player = {
-    id: string;
+    id: string;         // sessionId - identificador persistente del jugador
+    sessionId?: string; // alias explícito para compatibilidad (apunta al mismo valor que id)
     name: string;
-    sessionId?: string; // ID persistente para reconexión
 };
 
 export type DisconnectedPlayer = {
@@ -12,17 +12,17 @@ export type DisconnectedPlayer = {
     sessionId: string;
     disconnectTime: number; // timestamp
     playerIndex: number; // índice original del jugador en el array
-    oldSocketId: string; // socket ID anterior
 };
 
 export type Room = {
     code: string;
     players: Player[];
-    creatorId: string;      // ID del jugador que creó la sala (tiene permisos especiales)
+    creatorId: string;      // sessionId del jugador que creó la sala (tiene permisos especiales)
     state: Game;            // estado de la partida
     maxPlayers?: number;    // número de jugadores al inicio (solo se setea cuando empieza la partida)
     disconnectedPlayers: Map<string, DisconnectedPlayer>; // sessionId -> info del jugador desconectado
     disconnectTimers: Map<string, NodeJS.Timeout>; // sessionId -> timeout para eliminar al jugador
+    socketMapping: Map<string, string>; // sessionId -> socket.id actual (para emitir eventos)
 };
 
 export type GamePhase =

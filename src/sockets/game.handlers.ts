@@ -16,13 +16,18 @@ export function registerGameHandlers(io: Server, socket: Socket) {
         // Enviar roles privados a cada jugador
         console.log('🎭 Enviando roles a jugadores. Espías (sessionIds):', room.state.spies);
         room.players.forEach(player => {
-            const isSpy = room.state.spies.includes(player.sessionId!);
+            const isSpy = room.state.spies.includes(player.id); // player.id ES sessionId
             const roleData = {
                 role: isSpy ? 'spy' : 'resistance',
                 spies: isSpy ? room.state.spies : undefined
             };
-            console.log(`  -> Jugador ${player.name} (sessionId: ${player.sessionId}): ${roleData.role}`);
-            io.to(player.id).emit('game:role', roleData);
+            console.log(`  -> Jugador ${player.name} (sessionId: ${player.id}): ${roleData.role}`);
+            
+            // Obtener el socketId actual del jugador para emitir el evento
+            const playerSocketId = RoomManager.getSocketId(roomCode, player.id);
+            if (playerSocketId) {
+                io.to(playerSocketId).emit('game:role', roleData);
+            }
         });
 
         callback?.({ ok: true });
@@ -32,10 +37,14 @@ export function registerGameHandlers(io: Server, socket: Socket) {
         const room = RoomManager.getRoom(roomCode);
         if (!room) return;
         
-        const player = room.players.find(p => p.id === socket.id);
-        if (!player || !player.sessionId) return;
+        // Obtener sessionId desde socketId
+        const sessionData = RoomManager.getSessionIdFromSocket(socket.id);
+        if (!sessionData) return;
         
-        GameState.proposeTeam(roomCode, player.sessionId, teamIds);
+        const player = room.players.find(p => p.id === sessionData.sessionId);
+        if (!player) return;
+        
+        GameState.proposeTeam(roomCode, player.id, teamIds);
         io.to(roomCode).emit('game:update', GameState.getPublicState(roomCode));
     });
 
@@ -43,11 +52,15 @@ export function registerGameHandlers(io: Server, socket: Socket) {
         const room = RoomManager.getRoom(roomCode);
         if (!room) return;
 
-        const player = room.players.find(p => p.id === socket.id);
-        if (!player || !player.sessionId) return;
+        // Obtener sessionId desde socketId
+        const sessionData = RoomManager.getSessionIdFromSocket(socket.id);
+        if (!sessionData) return;
+        
+        const player = room.players.find(p => p.id === sessionData.sessionId);
+        if (!player) return;
 
         const phaseBefore = room.state.phase;
-        GameState.voteTeam(roomCode, player.sessionId, vote);
+        GameState.voteTeam(roomCode, player.id, vote);
         const phaseAfter = room.state.phase;
 
         io.to(roomCode).emit('game:update', GameState.getPublicState(roomCode));
@@ -56,12 +69,17 @@ export function registerGameHandlers(io: Server, socket: Socket) {
         if (phaseBefore !== 'reveal' && phaseAfter === 'reveal') {
             console.log('🎭 Partida terminada. Revelando roles a todos los jugadores. Espías (sessionIds):', room.state.spies);
             room.players.forEach(p => {
-                const isSpy = room.state.spies.includes(p.sessionId!);
+                const isSpy = room.state.spies.includes(p.id); // player.id ES sessionId
                 const roleData = {
                     role: isSpy ? 'spy' : 'resistance',
                     spies: room.state.spies // Ahora todos reciben la lista de espías (sessionIds)
                 };
-                io.to(p.id).emit('game:role', roleData);
+                
+                // Obtener el socketId actual del jugador para emitir el evento
+                const playerSocketId = RoomManager.getSocketId(roomCode, p.id);
+                if (playerSocketId) {
+                    io.to(playerSocketId).emit('game:role', roleData);
+                }
             });
         }
     });
@@ -70,11 +88,15 @@ export function registerGameHandlers(io: Server, socket: Socket) {
         const room = RoomManager.getRoom(roomCode);
         if (!room) return;
 
-        const player = room.players.find(p => p.id === socket.id);
-        if (!player || !player.sessionId) return;
+        // Obtener sessionId desde socketId
+        const sessionData = RoomManager.getSessionIdFromSocket(socket.id);
+        if (!sessionData) return;
+        
+        const player = room.players.find(p => p.id === sessionData.sessionId);
+        if (!player) return;
 
         const phaseBefore = room.state.phase;
-        GameState.performMissionAction(roomCode, player.sessionId, action);
+        GameState.performMissionAction(roomCode, player.id, action);
         const phaseAfter = room.state.phase;
 
         io.to(roomCode).emit('game:update', GameState.getPublicState(roomCode));
@@ -83,12 +105,17 @@ export function registerGameHandlers(io: Server, socket: Socket) {
         if (phaseBefore !== 'reveal' && phaseAfter === 'reveal') {
             console.log('🎭 Partida terminada. Revelando roles a todos los jugadores. Espías (sessionIds):', room.state.spies);
             room.players.forEach(p => {
-                const isSpy = room.state.spies.includes(p.sessionId!);
+                const isSpy = room.state.spies.includes(p.id); // player.id ES sessionId
                 const roleData = {
                     role: isSpy ? 'spy' : 'resistance',
                     spies: room.state.spies // Ahora todos reciben la lista de espías (sessionIds)
                 };
-                io.to(p.id).emit('game:role', roleData);
+                
+                // Obtener el socketId actual del jugador para emitir el evento
+                const playerSocketId = RoomManager.getSocketId(roomCode, p.id);
+                if (playerSocketId) {
+                    io.to(playerSocketId).emit('game:role', roleData);
+                }
             });
         }
     });
@@ -97,10 +124,14 @@ export function registerGameHandlers(io: Server, socket: Socket) {
         const room = RoomManager.getRoom(roomCode);
         if (!room || room.state.phase === 'lobby') return;
 
-        const player = room.players.find(p => p.id === socket.id);
-        if (!player || !player.sessionId) return;
+        // Obtener sessionId desde socketId
+        const sessionData = RoomManager.getSessionIdFromSocket(socket.id);
+        if (!sessionData) return;
+        
+        const player = room.players.find(p => p.id === sessionData.sessionId);
+        if (!player) return;
 
-        const isSpy = room.state.spies.includes(player.sessionId);
+        const isSpy = room.state.spies.includes(player.id); // player.id ES sessionId
         const isGameOver = room.state.phase === 'reveal';
 
         const roleData = {
@@ -120,7 +151,14 @@ export function registerGameHandlers(io: Server, socket: Socket) {
             return;
         }
 
-        const isCreator = RoomManager.isCreator(roomCode, socket.id);
+        // Obtener sessionId desde socketId
+        const sessionData = RoomManager.getSessionIdFromSocket(socket.id);
+        if (!sessionData) {
+            callback?.({ error: 'No se pudo identificar al jugador' });
+            return;
+        }
+
+        const isCreator = RoomManager.isCreator(roomCode, sessionData.sessionId);
 
         // Verificar permisos: el creador puede reiniciar en cualquier momento
         if (!isCreator && room.state.phase !== 'reveal') {
@@ -139,13 +177,18 @@ export function registerGameHandlers(io: Server, socket: Socket) {
         // Enviar roles privados a cada jugador
         console.log('🎭 Enviando roles a jugadores (partida reiniciada). Espías (sessionIds):', room.state.spies);
         room.players.forEach(player => {
-            const isSpy = room.state.spies.includes(player.sessionId!);
+            const isSpy = room.state.spies.includes(player.id); // player.id ES sessionId
             const roleData = {
                 role: isSpy ? 'spy' : 'resistance',
                 spies: isSpy ? room.state.spies : undefined
             };
-            console.log(`  -> Jugador ${player.name} (sessionId: ${player.sessionId}): ${roleData.role}`);
-            io.to(player.id).emit('game:role', roleData);
+            console.log(`  -> Jugador ${player.name} (sessionId: ${player.id}): ${roleData.role}`);
+            
+            // Obtener el socketId actual del jugador para emitir el evento
+            const playerSocketId = RoomManager.getSocketId(roomCode, player.id);
+            if (playerSocketId) {
+                io.to(playerSocketId).emit('game:role', roleData);
+            }
         });
 
         callback?.({ ok: true });
@@ -158,7 +201,14 @@ export function registerGameHandlers(io: Server, socket: Socket) {
             return;
         }
 
-        const isCreator = RoomManager.isCreator(roomCode, socket.id);
+        // Obtener sessionId desde socketId
+        const sessionData = RoomManager.getSessionIdFromSocket(socket.id);
+        if (!sessionData) {
+            callback?.({ error: 'No se pudo identificar al jugador' });
+            return;
+        }
+
+        const isCreator = RoomManager.isCreator(roomCode, sessionData.sessionId);
 
         // Verificar permisos: el creador puede volver al lobby en cualquier momento
         if (!isCreator && room.state.phase !== 'reveal') {

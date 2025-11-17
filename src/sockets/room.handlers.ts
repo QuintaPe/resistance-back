@@ -5,12 +5,21 @@ import { RoomManager } from '../game/roomManager';
 export function registerRoomHandlers(io: Server, socket: Socket) {
 
     socket.on('room:create', ({ name }, callback) => {
-        const room = RoomManager.createRoom(socket.id); // Pasar el socket.id como creatorId
-        const sessionId = RoomManager.addPlayer(room.code, socket.id, name);
+        // Generar sessionId para el creador
+        const sessionId = RoomManager.generateSessionId();
+        
+        // Crear sala con el sessionId del creador
+        const room = RoomManager.createRoom(sessionId);
+        
+        // Agregar el jugador a la sala
+        RoomManager.addPlayer(room.code, socket.id, name, sessionId);
 
         socket.join(room.code);
 
-        callback?.({ roomCode: room.code, playerId: socket.id, sessionId });
+        console.log(`✨ Sala creada: ${room.code} | Creador: ${name} (sessionId: ${sessionId})`);
+
+        // playerId ES sessionId
+        callback?.({ roomCode: room.code, playerId: sessionId, sessionId });
         io.to(room.code).emit('room:update', RoomManager.getPublicState(room.code));
     });
 
@@ -51,12 +60,12 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
                     // Notificar a todos de la reconexión
                     io.to(roomCode).emit('room:update', publicState);
                     io.to(roomCode).emit('player:reconnected', {
-                        playerId: socket.id,
+                        playerId: sessionId, // ✅ Usar sessionId como playerId
                         message: `${reconnectedPlayer.name} se ha reconectado`
                     });
                 }
 
-                callback?.({ roomCode, playerId: socket.id, sessionId, reconnected: true });
+                callback?.({ roomCode, playerId: sessionId, sessionId, reconnected: true }); // ✅ Devolver sessionId
                 return;
             }
         }
@@ -68,35 +77,60 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
             return callback?.({ error: joinCheck.error });
         }
 
-        // Agregar el jugador a la sala
+        // Agregar el jugador a la sala (genera sessionId si no se proporciona)
         const newSessionId = RoomManager.addPlayer(roomCode, socket.id, name, sessionId);
         socket.join(roomCode);
 
+        console.log(`👤 Jugador unido: ${name} (sessionId: ${newSessionId})`);
 
-        callback?.({ roomCode, playerId: socket.id, sessionId: newSessionId });
+        // playerId ES sessionId
+        callback?.({ roomCode, playerId: newSessionId, sessionId: newSessionId });
         io.to(roomCode).emit('room:update', RoomManager.getPublicState(roomCode));
     });
 
     // Expulsar a un jugador (solo el creador)
     socket.on('player:kick', ({ roomCode, targetPlayerId }, callback) => {
-        console.log(`📩 Solicitud de expulsión recibida de ${socket.id} para expulsar ${targetPlayerId} en sala ${roomCode}`);
+        console.log(`📩 Solicitud de expulsión recibida para expulsar ${targetPlayerId} en sala ${roomCode}`);
 
-        const result = RoomManager.kickPlayer(roomCode, socket.id, targetPlayerId);
+        const room = RoomManager.getRoom(roomCode);
+        if (!room) {
+            return callback?.({ error: "La sala no existe" });
+        }
+
+        // Buscar el sessionId del socket actual (quien solicita la expulsión)
+        let requesterSessionId: string | null = null;
+        for (const [sessionId, sid] of room.socketMapping.entries()) {
+            if (sid === socket.id) {
+                requesterSessionId = sessionId;
+                break;
+            }
+        }
+
+        if (!requesterSessionId) {
+            return callback?.({ error: "No se pudo identificar al solicitante" });
+        }
+
+        // Intentar expulsar usando sessionIds
+        const result = RoomManager.kickPlayer(roomCode, requesterSessionId, targetPlayerId);
 
         if (!result.success) {
             console.log(`❌ Expulsión fallida: ${result.error}`);
             return callback?.({ error: result.error });
         }
 
-        // Notificar al jugador expulsado
-        io.to(targetPlayerId).emit('player:kicked', {
-            message: 'Has sido expulsado de la sala por el creador'
-        });
+        // Obtener el socketId del jugador expulsado para notificarle
+        const targetSocketId = RoomManager.getSocketId(roomCode, targetPlayerId);
+        if (targetSocketId) {
+            // Notificar al jugador expulsado
+            io.to(targetSocketId).emit('player:kicked', {
+                message: 'Has sido expulsado de la sala por el creador'
+            });
 
-        // Desconectar al jugador expulsado de la sala
-        const targetSocket = io.sockets.sockets.get(targetPlayerId);
-        if (targetSocket) {
-            targetSocket.leave(roomCode);
+            // Desconectar al jugador expulsado de la sala
+            const targetSocket = io.sockets.sockets.get(targetSocketId);
+            if (targetSocket) {
+                targetSocket.leave(roomCode);
+            }
         }
 
         // Notificar a todos en la sala
@@ -117,8 +151,14 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
             return callback?.({ error: "La sala no existe" });
         }
 
+        // Obtener sessionId desde socketId
+        const sessionData = RoomManager.getSessionIdFromSocket(socket.id);
+        if (!sessionData) {
+            return callback?.({ error: "No se pudo identificar al solicitante" });
+        }
+
         // Validar que quien envía es el creador
-        if (!RoomManager.isCreator(roomCode, socket.id)) {
+        if (!RoomManager.isCreator(roomCode, sessionData.sessionId)) {
             return callback?.({ error: "Solo el creador puede cambiar el líder" });
         }
 
