@@ -1,11 +1,16 @@
 // src/app.ts
+
 import express from 'express';
 import cors from 'cors';
-import { errorHandler } from './middleware/errorHandler';
+import { errorMiddleware } from './middleware/error.middleware';
 
+/**
+ * Crea y configura la aplicación Express
+ */
 export function createApp() {
   const app = express();
 
+  // Middleware global
   app.use(cors());
   app.use(express.json());
 
@@ -15,7 +20,7 @@ export function createApp() {
   });
 
   // Middleware global de errores
-  app.use(errorHandler);
+  app.use(errorMiddleware);
 
   return app;
 }

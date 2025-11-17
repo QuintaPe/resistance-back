@@ -1,12 +1,12 @@
 // src/server.ts
+
 import dotenv from 'dotenv';
 dotenv.config();
 
 import http from 'http';
 import { createApp } from './app';
 import { initSocket } from './sockets';
-
-const PORT = process.env.PORT || 3000;
+import { PORT } from './config/env.config';
 
 // Crear Express
 const app = createApp();
@@ -19,5 +19,5 @@ initSocket(server);
 
 // Arrancar servidor
 server.listen(PORT, () => {
-    console.log(`Servidor escuchando en http://localhost:${PORT}`);
+    console.log(`🚀 Servidor escuchando en http://localhost:${PORT}`);
 });
