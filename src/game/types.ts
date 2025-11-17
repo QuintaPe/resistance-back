@@ -3,11 +3,14 @@
 export type Player = {
     id: string;
     name: string;
+    sessionId?: string; // ID persistente para reconexión
 };
 
 export type DisconnectedPlayer = {
     name: string;
     wasSpy: boolean;
+    sessionId: string;
+    disconnectTime: number; // timestamp
 };
 
 export type Room = {
@@ -15,7 +18,8 @@ export type Room = {
     players: Player[];
     state: Game;            // estado de la partida
     maxPlayers?: number;    // número de jugadores al inicio (solo se setea cuando empieza la partida)
-    disconnectedPlayers: Map<string, DisconnectedPlayer>; // id -> info del jugador desconectado
+    disconnectedPlayers: Map<string, DisconnectedPlayer>; // sessionId -> info del jugador desconectado
+    disconnectTimers: Map<string, NodeJS.Timeout>; // sessionId -> timeout para eliminar al jugador
 };
 
 export type GamePhase =

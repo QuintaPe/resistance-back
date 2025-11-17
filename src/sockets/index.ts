@@ -8,7 +8,14 @@ import { RoomManager } from '../game/roomManager';
 
 export function initSocket(server: HttpServer) {
     const io = new Server(server, {
-        cors: { origin: "*" }
+        cors: { origin: "*" },
+        // Configuración optimizada para móviles
+        pingTimeout: 60000,          // 60 segundos antes de considerar desconexión
+        pingInterval: 25000,          // Verificar conexión cada 25 segundos
+        connectTimeout: 45000,        // 45 segundos para establecer conexión
+        transports: ['websocket', 'polling'], // Usar WebSocket con fallback a polling
+        allowUpgrades: true,          // Permitir upgrade de polling a websocket
+        perMessageDeflate: false      // Desactivar compresión para mejor rendimiento en móvil
     });
 
     io.on('connection', (socket) => {
@@ -18,36 +25,43 @@ export function initSocket(server: HttpServer) {
         registerRoomHandlers(io, socket);
         registerGameHandlers(io, socket);
 
-        socket.on('disconnect', () => {
-            console.log(`Socket desconectado: ${socket.id}`);
+        socket.on('disconnect', (reason) => {
+            console.log(`Socket desconectado: ${socket.id}, razón: ${reason}`);
 
             // Buscar la sala del jugador
             const room = RoomManager.findRoomByPlayerId(socket.id);
             if (room) {
-                console.log(`Jugador ${socket.id} saliendo de la sala ${room.code}`);
+                console.log(`Jugador ${socket.id} desconectándose de la sala ${room.code}`);
 
-                // Si la partida ya comenzó, guardar información del jugador antes de eliminarlo
-                if (room.state.phase !== 'lobby') {
-                    const player = room.players.find(p => p.id === socket.id);
-                    if (player) {
-                        const wasSpy = room.state.spies.includes(socket.id);
-                        room.disconnectedPlayers.set(socket.id, {
-                            name: player.name,
-                            wasSpy
-                        });
-                        console.log(`💾 Guardado info del jugador ${player.name} (${wasSpy ? 'espía' : 'resistencia'}) para posible reemplazo`);
+                // Si está en el lobby, eliminar inmediatamente
+                if (room.state.phase === 'lobby') {
+                    const updatedRoom = RoomManager.removePlayer(room.code, socket.id);
+                    if (updatedRoom) {
+                        io.to(room.code).emit('room:update', RoomManager.getPublicState(room.code));
+                        console.log(`Sala ${room.code} actualizada. Jugadores restantes: ${updatedRoom.players.length}`);
+                    } else {
+                        console.log(`Sala ${room.code} eliminada (quedó vacía)`);
                     }
-                }
-
-                // Eliminar al jugador de la sala
-                const updatedRoom = RoomManager.removePlayer(room.code, socket.id);
-
-                // Si la sala aún existe (no quedó vacía), notificar a los demás
-                if (updatedRoom) {
-                    io.to(room.code).emit('room:update', RoomManager.getPublicState(room.code));
-                    console.log(`Sala ${room.code} actualizada. Jugadores restantes: ${updatedRoom.players.length}`);
                 } else {
-                    console.log(`Sala ${room.code} eliminada (quedó vacía)`);
+                    // Partida en curso - dar tiempo para reconexión
+                    RoomManager.markPlayerDisconnected(room.code, socket.id, () => {
+                        // Callback cuando expira el timeout
+                        const finalRoom = RoomManager.removePlayer(room.code, socket.id);
+                        if (finalRoom) {
+                            io.to(room.code).emit('room:update', RoomManager.getPublicState(room.code));
+                            console.log(`⚠️ Jugador eliminado permanentemente. Sala ${room.code} actualizada.`);
+                        } else {
+                            RoomManager.clearRoomTimers(room.code);
+                            console.log(`Sala ${room.code} eliminada (quedó vacía)`);
+                        }
+                    });
+
+                    // Notificar inmediatamente que el jugador está desconectado
+                    io.to(room.code).emit('room:update', RoomManager.getPublicState(room.code));
+                    io.to(room.code).emit('player:disconnected', {
+                        playerId: socket.id,
+                        message: 'Un jugador se ha desconectado temporalmente'
+                    });
                 }
             }
         });

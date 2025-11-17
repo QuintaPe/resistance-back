@@ -174,7 +174,7 @@ socket.on('connection', (socket) => {
 socket.emit('room:create', 
     { name: "NombreJugador" }, 
     (response) => {
-        // response: { roomCode: "ABCDE", playerId: "socket-id-123" }
+        // response: { roomCode: "ABCDE", playerId: "socket-id-123", sessionId: "session_xxx" }
     }
 );
 ```
@@ -184,8 +184,11 @@ socket.emit('room:create',
 {
     roomCode: string;   // Código de sala
     playerId: string;   // ID del jugador (socket.id)
+    sessionId: string;  // ID de sesión persistente (para reconexión)
 }
 ```
+
+⚠️ **IMPORTANTE**: Guarda el `sessionId` en localStorage/AsyncStorage para permitir reconexión automática.
 
 **Broadcast a la Sala**: `room:update`
 ```typescript
@@ -205,13 +208,14 @@ socket.on('room:update', (publicState) => {
 socket.emit('room:join', 
     { 
         roomCode: "ABCDE", 
-        name: "NombreJugador" 
+        name: "NombreJugador",
+        sessionId?: "session_xxx"  // Opcional: para reconexión
     }, 
     (response) => {
         if (response.error) {
             // Error: "La sala no existe"
         } else {
-            // response: { roomCode: "ABCDE", playerId: "socket-id-456" }
+            // response: { roomCode: "ABCDE", playerId: "socket-id-456", sessionId: "session_xxx", reconnected: true }
         }
     }
 );
@@ -222,9 +226,15 @@ socket.emit('room:join',
 {
     roomCode?: string;
     playerId?: string;
-    error?: string;     // Si la sala no existe
+    sessionId?: string;   // ID de sesión para reconexión
+    reconnected?: boolean; // true si fue una reconexión exitosa
+    error?: string;        // Si la sala no existe o está llena
 }
 ```
+
+⚠️ **IMPORTANTE**: 
+- Guarda el `sessionId` para permitir reconexión
+- Si proporcionas un `sessionId` y el jugador estaba desconectado, se reconectará automáticamente con su rol preservado
 
 **Broadcast a la Sala**: `room:update`
 
@@ -1119,10 +1129,50 @@ socket.on('game:start', ({ roomCode }) => {
 
 ### Manejo de Desconexiones
 
-**Actualmente NO implementado**, pero debería considerarse:
-- ¿Qué pasa si un jugador se desconecta durante el juego?
-- ¿Se pausa el juego o se elimina al jugador?
-- Implementar eventos `disconnect` en el servidor
+**✅ IMPLEMENTADO** - Sistema completo de reconexión para móviles:
+
+#### Comportamiento
+
+1. **En el Lobby**: 
+   - Si un jugador se desconecta, se elimina inmediatamente de la sala
+
+2. **Durante la Partida**:
+   - El jugador se marca como "desconectado temporalmente"
+   - Tiene **30 segundos** para reconectarse
+   - Su rol (espía/resistencia) se preserva
+   - Si reconecta antes de 30s, continúa jugando normalmente
+   - Si no reconecta, se elimina permanentemente
+
+#### Eventos de Notificación
+
+**Evento del Servidor**: `player:disconnected`
+
+```typescript
+socket.on('player:disconnected', (data) => {
+    // data: { playerId: string, message: string }
+    console.log(data.message); // "Un jugador se ha desconectado temporalmente"
+});
+```
+
+**Evento del Servidor**: `player:reconnected`
+
+```typescript
+socket.on('player:reconnected', (data) => {
+    // data: { playerId: string, message: string }
+    console.log(data.message); // "Juan se ha reconectado"
+});
+```
+
+#### Configuración de Socket.IO
+
+El servidor está configurado con parámetros optimizados para móviles:
+- `pingTimeout`: 60000ms (60 segundos)
+- `pingInterval`: 25000ms (25 segundos)
+- `connectTimeout`: 45000ms
+- `transports`: ['websocket', 'polling']
+- `allowUpgrades`: true
+
+Ver `MOBILE_RECONNECTION_GUIDE.md` para instrucciones completas de implementación en el frontend.
 
 ### Escalabilidad
 
