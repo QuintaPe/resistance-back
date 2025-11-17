@@ -61,11 +61,16 @@ class RoomManagerClass {
         const room = this.rooms.get(roomCode);
         if (!room) return null;
 
+        // Buscar el jugador ANTES de eliminarlo
+        const player = room.players.find(p => p.id === playerId);
+
         // Eliminar el jugador de la lista
         room.players = room.players.filter(p => p.id !== playerId);
 
-        // Eliminar del array de spies si era espía
-        room.state.spies = room.state.spies.filter(spyId => spyId !== playerId);
+        // Eliminar del array de spies si era espía (usando sessionId)
+        if (player && player.sessionId) {
+            room.state.spies = room.state.spies.filter(spyId => spyId !== player.sessionId);
+        }
 
         // Si la sala queda vacía, eliminarla
         if (room.players.length === 0) {
@@ -110,89 +115,18 @@ class RoomManagerClass {
         };
     }
 
-    canJoinRoom(roomCode: string): { canJoin: boolean; error?: string; replacingPlayer?: boolean } {
+    // Puede unirse solo en lobby (durante la partida solo se permiten reconexiones)
+    canJoinRoom(roomCode: string): { canJoin: boolean; error?: string } {
         const room = this.rooms.get(roomCode);
         if (!room) return { canJoin: false, error: "La sala no existe" };
 
-        // Si la partida no ha comenzado, siempre puede unirse
+        // En el lobby, permitir siempre
         if (room.state.phase === "lobby") {
-            return { canJoin: true, replacingPlayer: false };
+            return { canJoin: true };
         }
 
-        // Si la partida ya comenzó, verificar si hay espacio
-        if (!room.maxPlayers) {
-            // No debería pasar, pero por seguridad
-            return { canJoin: false, error: "Error interno: maxPlayers no definido" };
-        }
-
-        // Si la sala está llena (tiene el número original de jugadores)
-        if (room.players.length >= room.maxPlayers) {
-            return { canJoin: false, error: "La sala está llena" };
-        }
-
-        // Hay espacio (alguien se desconectó)
-        return { canJoin: true, replacingPlayer: true };
-    }
-
-    getReplacementRole(roomCode: string): boolean | null {
-        const room = this.rooms.get(roomCode);
-        if (!room) return null;
-
-        // Obtener el primer jugador desconectado (FIFO)
-        const disconnectedEntries = Array.from(room.disconnectedPlayers.values());
-        if (disconnectedEntries.length === 0) return null;
-
-        // Retornar si era espía o no
-        return disconnectedEntries[0].wasSpy;
-    }
-
-    assignReplacementPlayer(roomCode: string, newPlayerId: string): void {
-        const room = this.rooms.get(roomCode);
-        if (!room) return;
-
-        // Obtener el primer jugador desconectado (FIFO)
-        const disconnectedEntry = Array.from(room.disconnectedPlayers.entries())[0];
-        if (!disconnectedEntry) return;
-
-        const [oldSessionId, playerInfo] = disconnectedEntry;
-
-        console.log(`🔄 Asignando rol de jugador desconectado a ${newPlayerId}`);
-        console.log(`  -> Jugador desconectado era: ${playerInfo.name} (espía: ${playerInfo.wasSpy})`);
-
-        // Si era espía, necesitamos agregar el nuevo socketId al array de spies
-        if (playerInfo.wasSpy) {
-            // Buscar y eliminar cualquier socket ID antiguo que ya no corresponda a jugadores activos
-            const oldSpyIds = room.state.spies.filter(spyId => {
-                // Un spyId es "antiguo" si no corresponde a ningún jugador activo Y no es el nuevo jugador
-                return !room.players.some(p => p.id === spyId) && spyId !== newPlayerId;
-            });
-
-            // Eliminar el primer socket ID antiguo (del jugador que se desconectó)
-            if (oldSpyIds.length > 0) {
-                const oldSocketId = oldSpyIds[0];
-                room.state.spies = room.state.spies.filter(spyId => spyId !== oldSocketId);
-                console.log(`  -> Eliminado socket ID antiguo ${oldSocketId} del array de espías`);
-            }
-
-            // Agregar el nuevo socket ID al array de espías
-            if (!room.state.spies.includes(newPlayerId)) {
-                room.state.spies.push(newPlayerId);
-                console.log(`  -> Agregado ${newPlayerId} al array de espías`);
-            }
-        }
-
-        // Cancelar el timer si existe
-        const timer = room.disconnectTimers.get(oldSessionId);
-        if (timer) {
-            clearTimeout(timer);
-            room.disconnectTimers.delete(oldSessionId);
-            console.log(`  -> Timer cancelado para ${playerInfo.name}`);
-        }
-
-        // Eliminar de la lista de desconectados
-        room.disconnectedPlayers.delete(oldSessionId);
-
-        console.log(`✅ Rol asignado exitosamente a nuevo jugador`);
+        // Durante la partida, NO se permiten nuevos jugadores (solo reconexiones con sessionId)
+        return { canJoin: false, error: "La partida ya comenzó" };
     }
 
     // Buscar jugador por sessionId
@@ -221,6 +155,7 @@ class RoomManagerClass {
         if (!disconnectedPlayer) return false;
 
         console.log(`🔄 Reconectando jugador ${disconnectedPlayer.name} (sessionId: ${sessionId})`);
+        console.log(`  -> Índice original: ${disconnectedPlayer.playerIndex}, Socket nuevo: ${newSocketId}`);
 
         // Cancelar el timer de desconexión si existe
         const timer = room.disconnectTimers.get(sessionId);
@@ -230,39 +165,20 @@ class RoomManagerClass {
             console.log(`⏰ Timer de desconexión cancelado para ${disconnectedPlayer.name}`);
         }
 
-        // Restaurar el jugador con el nuevo socketId
-        room.players.push({
+        // Restaurar el jugador en su posición original con el nuevo socketId
+        // ✨ El sessionId se mantiene igual, por lo que no necesitamos actualizar nada más
+        room.players.splice(disconnectedPlayer.playerIndex, 0, {
             id: newSocketId,
             name: disconnectedPlayer.name,
             sessionId: sessionId
         });
 
-        // Si era espía, reemplazar el socketId antiguo con el nuevo en el array de spies
-        if (disconnectedPlayer.wasSpy) {
-            // Buscar si hay algún socketId antiguo de este jugador (no debería estar en players)
-            const oldSpyIds = room.state.spies.filter(spyId => {
-                // Un spyId es "antiguo" si no corresponde a ningún jugador activo
-                return !room.players.some(p => p.id === spyId);
-            });
-
-            // Eliminar el primer socketId antiguo encontrado (asumimos que es el del jugador reconectado)
-            if (oldSpyIds.length > 0) {
-                const oldSocketId = oldSpyIds[0];
-                room.state.spies = room.state.spies.filter(spyId => spyId !== oldSocketId);
-                console.log(`🕵️ Eliminado socketId antiguo ${oldSocketId} del array de espías`);
-            }
-
-            // Agregar el nuevo socketId
-            if (!room.state.spies.includes(newSocketId)) {
-                room.state.spies.push(newSocketId);
-                console.log(`🕵️ Agregado ${newSocketId} al array de espías`);
-            }
-        }
+        console.log(`📍 Jugador restaurado en índice ${disconnectedPlayer.playerIndex}`);
+        console.log(`✅ Jugador ${disconnectedPlayer.name} reconectado exitosamente (el sessionId persiste, no se requiere actualizar roles)`);
 
         // Eliminar de la lista de desconectados
         room.disconnectedPlayers.delete(sessionId);
 
-        console.log(`✅ Jugador ${disconnectedPlayer.name} reconectado exitosamente`);
         return true;
     }
 
@@ -271,29 +187,35 @@ class RoomManagerClass {
         const room = this.rooms.get(roomCode);
         if (!room) return;
 
-        const player = room.players.find(p => p.id === socketId);
-        if (!player || !player.sessionId) return;
+        const playerIndex = room.players.findIndex(p => p.id === socketId);
+        if (playerIndex === -1) return;
+
+        const player = room.players[playerIndex];
+        if (!player.sessionId) return;
 
         // Si la partida ya comenzó, guardar información del jugador
         if (room.state.phase !== 'lobby') {
-            const wasSpy = room.state.spies.includes(socketId);
+            const wasSpy = room.state.spies.includes(player.sessionId);
 
             room.disconnectedPlayers.set(player.sessionId, {
                 name: player.name,
                 wasSpy,
                 sessionId: player.sessionId,
-                disconnectTime: Date.now()
+                disconnectTime: Date.now(),
+                playerIndex: playerIndex, // Guardar el índice original
+                oldSocketId: socketId // Para referencia (no se usa para spies)
             });
 
-            console.log(`⏳ Jugador ${player.name} desconectado temporalmente. Esperando reconexión (30s)...`);
+            console.log(`⏳ Jugador ${player.name} desconectado temporalmente (índice: ${playerIndex}, sessionId: ${player.sessionId}). Esperando reconexión (30s)...`);
 
             // Configurar timeout de 30 segundos
             const timeout = setTimeout(() => {
                 console.log(`⏰ Timeout alcanzado para ${player.name}. Eliminando permanentemente...`);
 
-                // Eliminar del array de spies si era espía
+                // Eliminar del array de spies si era espía (usando sessionId)
                 if (wasSpy) {
-                    room.state.spies = room.state.spies.filter(spyId => spyId !== socketId);
+                    room.state.spies = room.state.spies.filter(spyId => spyId !== player.sessionId);
+                    console.log(`🕵️ Eliminado ${player.sessionId} del array de espías`);
                 }
 
                 room.disconnectedPlayers.delete(player.sessionId!);
@@ -304,8 +226,9 @@ class RoomManagerClass {
             room.disconnectTimers.set(player.sessionId, timeout);
         }
 
-        // Remover el jugador de la lista activa (pero mantener en spies si era espía)
-        room.players = room.players.filter(p => p.id !== socketId);
+        // Remover el jugador de la lista activa
+        room.players.splice(playerIndex, 1);
+        console.log(`📤 Jugador removido del índice ${playerIndex}`);
     }
 
     // Limpiar todos los timers de una sala
@@ -353,19 +276,23 @@ class RoomManagerClass {
 
         console.log(`👢 ${creatorId} expulsando a ${targetPlayer.name} (${targetPlayerId}) de la sala ${roomCode}`);
 
-        // Si hay una partida en curso, limpiar el rol del jugador
-        if (room.state.phase !== 'lobby') {
-            // Eliminar de spies si era espía
-            room.state.spies = room.state.spies.filter(spyId => spyId !== targetPlayerId);
+        // Si hay una partida en curso, limpiar el rol del jugador (usando sessionId)
+        if (room.state.phase !== 'lobby' && targetPlayer.sessionId) {
+            const sessionId = targetPlayer.sessionId;
 
-            // Limpiar votaciones pendientes
-            delete room.state.teamVotes[targetPlayerId];
-            delete room.state.missionActions[targetPlayerId];
-            room.state.votedPlayers = room.state.votedPlayers.filter(id => id !== targetPlayerId);
-            room.state.playersActed = room.state.playersActed.filter(id => id !== targetPlayerId);
+            // Eliminar de spies si era espía (usando sessionId)
+            room.state.spies = room.state.spies.filter(spyId => spyId !== sessionId);
 
-            // Eliminar del equipo propuesto si estaba
-            room.state.proposedTeam = room.state.proposedTeam.filter(id => id !== targetPlayerId);
+            // Limpiar votaciones pendientes (usando sessionId)
+            delete room.state.teamVotes[sessionId];
+            delete room.state.missionActions[sessionId];
+            room.state.votedPlayers = room.state.votedPlayers.filter(id => id !== sessionId);
+            room.state.playersActed = room.state.playersActed.filter(id => id !== sessionId);
+
+            // Eliminar del equipo propuesto si estaba (usando sessionId)
+            room.state.proposedTeam = room.state.proposedTeam.filter(id => id !== sessionId);
+
+            console.log(`🧹 Limpiado datos de partida para sessionId: ${sessionId}`);
         }
 
         // Eliminar al jugador

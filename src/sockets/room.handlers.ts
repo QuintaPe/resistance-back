@@ -29,29 +29,32 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
             if (reconnected) {
                 socket.join(roomCode);
 
-                // Obtener la información del jugador reconectado
-                const disconnectedInfo = room.disconnectedPlayers.get(sessionId);
-                const wasSpy = disconnectedInfo?.wasSpy || room.state.spies.includes(socket.id);
+                // Obtener el jugador reconectado
+                const reconnectedPlayer = room.players.find(p => p.sessionId === sessionId);
+                if (reconnectedPlayer) {
+                    // Verificar si es espía usando sessionId
+                    const wasSpy = room.state.spies.includes(sessionId);
 
-                // Enviar el rol al jugador reconectado
-                const roleData = {
-                    role: wasSpy ? 'spy' : 'resistance',
-                    spies: wasSpy ? room.state.spies : undefined
-                };
+                    // Enviar el rol al jugador reconectado
+                    const roleData = {
+                        role: wasSpy ? 'spy' : 'resistance',
+                        spies: wasSpy ? room.state.spies : undefined
+                    };
 
-                console.log(`✅ Jugador reconectado. Enviando rol: ${roleData.role}`);
-                io.to(socket.id).emit('game:role', roleData);
+                    console.log(`✅ Jugador reconectado. Enviando rol: ${roleData.role} (sessionId: ${sessionId})`);
+                    io.to(socket.id).emit('game:role', roleData);
 
-                // Enviar el estado actual del juego
-                const publicState = RoomManager.getPublicState(roomCode);
-                io.to(socket.id).emit('game:update', publicState);
+                    // Enviar el estado actual del juego
+                    const publicState = RoomManager.getPublicState(roomCode);
+                    io.to(socket.id).emit('game:update', publicState);
 
-                // Notificar a todos de la reconexión
-                io.to(roomCode).emit('room:update', publicState);
-                io.to(roomCode).emit('player:reconnected', {
-                    playerId: socket.id,
-                    message: `${disconnectedInfo?.name || 'Un jugador'} se ha reconectado`
-                });
+                    // Notificar a todos de la reconexión
+                    io.to(roomCode).emit('room:update', publicState);
+                    io.to(roomCode).emit('player:reconnected', {
+                        playerId: socket.id,
+                        message: `${reconnectedPlayer.name} se ha reconectado`
+                    });
+                }
 
                 callback?.({ roomCode, playerId: socket.id, sessionId, reconnected: true });
                 return;
@@ -69,30 +72,6 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         const newSessionId = RoomManager.addPlayer(roomCode, socket.id, name, sessionId);
         socket.join(roomCode);
 
-        // Si está reemplazando a un jugador desconectado (nuevo jugador diferente)
-        if (joinCheck.replacingPlayer) {
-            console.log(`🔄 ${name} (${socket.id}) está reemplazando a un jugador en ${roomCode}`);
-
-            // Asignar el rol del jugador desconectado
-            RoomManager.assignReplacementPlayer(roomCode, socket.id);
-
-            // Obtener la sala actualizada después de la asignación
-            const updatedRoom = RoomManager.getRoom(roomCode);
-            if (updatedRoom) {
-                // Verificar si el nuevo jugador es espía
-                const isSpy = updatedRoom.state.spies.includes(socket.id);
-                const roleData = {
-                    role: isSpy ? 'spy' : 'resistance',
-                    spies: isSpy ? updatedRoom.state.spies : undefined
-                };
-                console.log(`  -> Jugador de reemplazo ${name} recibe rol: ${roleData.role}`);
-                io.to(socket.id).emit('game:role', roleData);
-
-                // Enviar también el estado del juego
-                const publicState = RoomManager.getPublicState(roomCode);
-                io.to(socket.id).emit('game:update', publicState);
-            }
-        }
 
         callback?.({ roomCode, playerId: socket.id, sessionId: newSessionId });
         io.to(roomCode).emit('room:update', RoomManager.getPublicState(roomCode));

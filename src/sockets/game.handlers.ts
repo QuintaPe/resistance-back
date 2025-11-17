@@ -14,14 +14,14 @@ export function registerGameHandlers(io: Server, socket: Socket) {
         io.to(roomCode).emit('game:update', GameState.getPublicState(roomCode));
 
         // Enviar roles privados a cada jugador
-        console.log('🎭 Enviando roles a jugadores. Espías:', room.state.spies);
+        console.log('🎭 Enviando roles a jugadores. Espías (sessionIds):', room.state.spies);
         room.players.forEach(player => {
-            const isSpy = room.state.spies.includes(player.id);
+            const isSpy = room.state.spies.includes(player.sessionId!);
             const roleData = {
                 role: isSpy ? 'spy' : 'resistance',
                 spies: isSpy ? room.state.spies : undefined
             };
-            console.log(`  -> Jugador ${player.name} (${player.id}): ${roleData.role}`);
+            console.log(`  -> Jugador ${player.name} (sessionId: ${player.sessionId}): ${roleData.role}`);
             io.to(player.id).emit('game:role', roleData);
         });
 
@@ -29,7 +29,13 @@ export function registerGameHandlers(io: Server, socket: Socket) {
     });
 
     socket.on('team:propose', ({ roomCode, teamIds }) => {
-        GameState.proposeTeam(roomCode, socket.id, teamIds);
+        const room = RoomManager.getRoom(roomCode);
+        if (!room) return;
+        
+        const player = room.players.find(p => p.id === socket.id);
+        if (!player || !player.sessionId) return;
+        
+        GameState.proposeTeam(roomCode, player.sessionId, teamIds);
         io.to(roomCode).emit('game:update', GameState.getPublicState(roomCode));
     });
 
@@ -37,22 +43,25 @@ export function registerGameHandlers(io: Server, socket: Socket) {
         const room = RoomManager.getRoom(roomCode);
         if (!room) return;
 
+        const player = room.players.find(p => p.id === socket.id);
+        if (!player || !player.sessionId) return;
+
         const phaseBefore = room.state.phase;
-        GameState.voteTeam(roomCode, socket.id, vote);
+        GameState.voteTeam(roomCode, player.sessionId, vote);
         const phaseAfter = room.state.phase;
 
         io.to(roomCode).emit('game:update', GameState.getPublicState(roomCode));
 
         // Si el juego acaba de terminar, enviar roles a todos
         if (phaseBefore !== 'reveal' && phaseAfter === 'reveal') {
-            console.log('🎭 Partida terminada. Revelando roles a todos los jugadores. Espías:', room.state.spies);
-            room.players.forEach(player => {
-                const isSpy = room.state.spies.includes(player.id);
+            console.log('🎭 Partida terminada. Revelando roles a todos los jugadores. Espías (sessionIds):', room.state.spies);
+            room.players.forEach(p => {
+                const isSpy = room.state.spies.includes(p.sessionId!);
                 const roleData = {
                     role: isSpy ? 'spy' : 'resistance',
-                    spies: room.state.spies // Ahora todos reciben la lista de espías
+                    spies: room.state.spies // Ahora todos reciben la lista de espías (sessionIds)
                 };
-                io.to(player.id).emit('game:role', roleData);
+                io.to(p.id).emit('game:role', roleData);
             });
         }
     });
@@ -61,22 +70,25 @@ export function registerGameHandlers(io: Server, socket: Socket) {
         const room = RoomManager.getRoom(roomCode);
         if (!room) return;
 
+        const player = room.players.find(p => p.id === socket.id);
+        if (!player || !player.sessionId) return;
+
         const phaseBefore = room.state.phase;
-        GameState.performMissionAction(roomCode, socket.id, action);
+        GameState.performMissionAction(roomCode, player.sessionId, action);
         const phaseAfter = room.state.phase;
 
         io.to(roomCode).emit('game:update', GameState.getPublicState(roomCode));
 
         // Si el juego acaba de terminar, enviar roles a todos
         if (phaseBefore !== 'reveal' && phaseAfter === 'reveal') {
-            console.log('🎭 Partida terminada. Revelando roles a todos los jugadores. Espías:', room.state.spies);
-            room.players.forEach(player => {
-                const isSpy = room.state.spies.includes(player.id);
+            console.log('🎭 Partida terminada. Revelando roles a todos los jugadores. Espías (sessionIds):', room.state.spies);
+            room.players.forEach(p => {
+                const isSpy = room.state.spies.includes(p.sessionId!);
                 const roleData = {
                     role: isSpy ? 'spy' : 'resistance',
-                    spies: room.state.spies // Ahora todos reciben la lista de espías
+                    spies: room.state.spies // Ahora todos reciben la lista de espías (sessionIds)
                 };
-                io.to(player.id).emit('game:role', roleData);
+                io.to(p.id).emit('game:role', roleData);
             });
         }
     });
@@ -86,9 +98,9 @@ export function registerGameHandlers(io: Server, socket: Socket) {
         if (!room || room.state.phase === 'lobby') return;
 
         const player = room.players.find(p => p.id === socket.id);
-        if (!player) return;
+        if (!player || !player.sessionId) return;
 
-        const isSpy = room.state.spies.includes(socket.id);
+        const isSpy = room.state.spies.includes(player.sessionId);
         const isGameOver = room.state.phase === 'reveal';
 
         const roleData = {
@@ -125,14 +137,14 @@ export function registerGameHandlers(io: Server, socket: Socket) {
         io.to(roomCode).emit('game:update', GameState.getPublicState(roomCode));
 
         // Enviar roles privados a cada jugador
-        console.log('🎭 Enviando roles a jugadores (partida reiniciada). Espías:', room.state.spies);
+        console.log('🎭 Enviando roles a jugadores (partida reiniciada). Espías (sessionIds):', room.state.spies);
         room.players.forEach(player => {
-            const isSpy = room.state.spies.includes(player.id);
+            const isSpy = room.state.spies.includes(player.sessionId!);
             const roleData = {
                 role: isSpy ? 'spy' : 'resistance',
                 spies: isSpy ? room.state.spies : undefined
             };
-            console.log(`  -> Jugador ${player.name} (${player.id}): ${roleData.role}`);
+            console.log(`  -> Jugador ${player.name} (sessionId: ${player.sessionId}): ${roleData.role}`);
             io.to(player.id).emit('game:role', roleData);
         });
 

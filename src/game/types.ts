@@ -11,6 +11,8 @@ export type DisconnectedPlayer = {
     wasSpy: boolean;
     sessionId: string;
     disconnectTime: number; // timestamp
+    playerIndex: number; // índice original del jugador en el array
+    oldSocketId: string; // socket ID anterior
 };
 
 export type Room = {

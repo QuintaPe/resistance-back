@@ -18,8 +18,9 @@ class GameStateClass {
         const failsRequired = getFailsRequired(n);
 
         const shuffled = shuffle([...players]);
-        const spies = shuffled.slice(0, numSpies).map((p: Player) => p.id);
-        console.log(spies);
+        // Usar sessionId para los espías (persiste entre reconexiones)
+        const spies = shuffled.slice(0, numSpies).map((p: Player) => p.sessionId!);
+        console.log('🕵️ Espías asignados (sessionIds):', spies);
         room.state = {
             phase: "proposeTeam",
             leaderIndex: initialLeaderIndex,
@@ -90,38 +91,38 @@ class GameStateClass {
         return RoomManager.getPublicState(roomCode);
     }
 
-    proposeTeam(roomCode: string, leaderId: string, teamIds: string[]) {
+    proposeTeam(roomCode: string, leaderSessionId: string, teamSessionIds: string[]) {
         const room = RoomManager.getRoom(roomCode);
         if (!room) return;
 
         const state = room.state;
         const leader = room.players[state.leaderIndex];
 
-        if (leader.id !== leaderId) return;
+        if (leader.sessionId !== leaderSessionId) return;
         if (state.phase !== "proposeTeam") return;
 
-        state.proposedTeam = teamIds;
+        state.proposedTeam = teamSessionIds;
         state.teamVotes = {};
         state.votedPlayers = []; // Limpiar para la nueva votación
         state.phase = "voteTeam";
     }
 
-    voteTeam(roomCode: string, playerId: string, vote: "approve" | "reject") {
+    voteTeam(roomCode: string, playerSessionId: string, vote: "approve" | "reject") {
         const room = RoomManager.getRoom(roomCode);
         if (!room) return;
 
         const state = room.state;
         if (state.phase !== "voteTeam") return;
 
-        state.teamVotes[playerId] = vote;
+        state.teamVotes[playerSessionId] = vote;
 
         // Agregar el jugador a votedPlayers si no está ya
-        if (!state.votedPlayers.includes(playerId)) {
-            state.votedPlayers.push(playerId);
+        if (!state.votedPlayers.includes(playerSessionId)) {
+            state.votedPlayers.push(playerSessionId);
         }
 
         // Comprobar si todos votaron
-        const allVoted = room.players.every((p) => state.teamVotes[p.id]);
+        const allVoted = room.players.every((p) => state.teamVotes[p.sessionId!]);
 
         if (!allVoted) return;
 
@@ -150,22 +151,22 @@ class GameStateClass {
         state.playersActed = []; // Limpiar para la nueva misión
     }
 
-    performMissionAction(roomCode: string, playerId: string, action: "success" | "fail") {
+    performMissionAction(roomCode: string, playerSessionId: string, action: "success" | "fail") {
         const room = RoomManager.getRoom(roomCode);
         if (!room) return;
 
         const state = room.state;
         if (state.phase !== "mission") return;
-        if (!state.proposedTeam.includes(playerId)) return;
+        if (!state.proposedTeam.includes(playerSessionId)) return;
 
-        const isSpy = state.spies.includes(playerId);
+        const isSpy = state.spies.includes(playerSessionId);
         if (action === "fail" && !isSpy) return;
 
-        state.missionActions[playerId] = action;
+        state.missionActions[playerSessionId] = action;
 
         // Agregar el jugador a playersActed si no está ya
-        if (!state.playersActed.includes(playerId)) {
-            state.playersActed.push(playerId);
+        if (!state.playersActed.includes(playerSessionId)) {
+            state.playersActed.push(playerSessionId);
         }
 
         const allSubmitted = state.proposedTeam.every((id) => state.missionActions[id]);
